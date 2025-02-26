@@ -1,6 +1,6 @@
 # This assumes the container is running on a system with a CUDA GPU
-
-FROM nvcr.io/nvidia/tensorflow:25.01-tf2-py3
+#ähttps://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel-25-01.html
+FROM nvcr.io/nvidia/tensorflow:24.11-tf2-py3
 
 # Set DEBIAN_FRONTEND temporarily for build-time only
 ARG DEBIAN_FRONTEND=noninteractive
@@ -11,7 +11,9 @@ ARG USERNAME=builder
 ARG USER_UID=1001
 ARG USER_GID=$USER_UID
 
-
+ENV TF_CPP_MIN_LOG_LEVEL 3
+ENV TF_FORCE_GPU_ALLOW_GROWTH=true
+ENV CUDA_VISIBLE_DEVICES=0
 ENV HOME=/home/$USERNAME
 
 # Create the user
@@ -22,8 +24,7 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && apt-get update \
     && apt-get install -y sudo \
     && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \
-    && chmod 0440 /etc/sudoers.d/$USERNAME   \
-    && sudo chown -R $USERNAME:$USERNAME $HOME
+    && chmod 0440 /etc/sudoers.d/$USERNAME   
 
 RUN apt-get update -y && apt-get upgrade -y  \
     && apt-get install -y wget curl unzip git ffmpeg libsm6 libxext6 \
@@ -34,9 +35,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 USER $USERNAME
 WORKDIR $HOME
+RUN sudo chown -R $USERNAME:$USERNAME $HOME
+RUN pip install hydra-core ipykernel ipywidgets tqdm seaborn
 
-ENV VIRTUAL_ENV="$HOME/.venv" 
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# ENV VIRTUAL_ENV="$HOME/.venv" 
+# ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # COPY pyproject.toml .
 # RUN uv sync --active 
@@ -46,6 +49,4 @@ ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 ENV CUDA_VISIBLE_DEVICES=0
 ENV TF_CPP_MIN_LOG_LEVEL 3
 
-
-ENV PATH="/root/.local/bin:${PATH}"
 

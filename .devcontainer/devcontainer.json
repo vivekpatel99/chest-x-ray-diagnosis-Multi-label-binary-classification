@@ -14,7 +14,9 @@
 		}
 	},
 	// 1. Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": []
+	// "forwardPorts": [
+	// 	6006
+	// ],
 	// 2. Use 'mounts' to make a list of local directories available inside the container. More info: https://code.visualstudio.com/remote/advancedcontainers/add-local-file-mount
 	// "mounts": [],
 	// 3. Use 'runArgs' to pass arguments to the container. 
@@ -27,7 +29,8 @@
 		"--ulimit",
 		"nofile=65536:65536",
 		"--shm-size",
-		"2g"
+		"2g",
+		"--privileged"
 	],
 	// 4. Features to add to the Dev Container. More info: https://containers.dev/implementors/features.
 	"features": {
@@ -59,7 +62,7 @@
 		"vscode": {
 			// Set *default* container specific settings.json values on container create.
 			"settings": {
-				"python.defaultInterpreterPath": "~/.venv/bin/python",
+				"python.defaultInterpreterPath": "/usr/bin/python",
 				"terminal.integrated.shell.linux": "/bin/bash",
 				"terminal.integrated.defaultProfile.linux": "bash"
 			},

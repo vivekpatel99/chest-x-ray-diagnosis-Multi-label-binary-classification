@@ -170,3 +170,6 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 datasets/
+exported_models/
+logs/
+pretrain_weights/
