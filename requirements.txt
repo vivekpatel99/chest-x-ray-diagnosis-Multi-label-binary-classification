@@ -1,0 +1,7 @@
+hydra-core 
+ipykernel 
+ipywidgets  
+mlflow 
+opencv-python 
+seaborn 
+tqdm
