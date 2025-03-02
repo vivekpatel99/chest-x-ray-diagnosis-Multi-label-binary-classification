@@ -8,7 +8,7 @@
 		// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
 		"dockerfile": "../Dockerfile",
 		"args": {
-			"USERNAME": "builder", // Replace with your host username
+			"USERNAME": "ubuntu", // Replace with your host username
 			"UID": "${localEnv:UID}", // Automatically gets the host user's UID
 			"GID": "${localEnv:GID}" // Automatically gets the host user's GID
 		}
@@ -84,7 +84,7 @@
 			]
 		}
 	},
-	// "containerUser": "builder",
+	"containerUser": "ubuntu",
 	// 6. Set `remoteUser` to `root` to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	// "remoteUser": "builder",
 	"updateRemoteUserUID": true,

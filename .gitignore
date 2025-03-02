@@ -173,3 +173,6 @@ datasets/
 exported_models/
 logs/
 pretrain_weights/
+kaggle.json
+sample/
+
