@@ -51,7 +51,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 USER $USERNAME
 WORKDIR $HOME
 # RUN sudo chown -R $USERNAME:$USERNAME $HOME
-RUN pip install tensorflow==2.18.0 hydra-core ipykernel ipywidgets tqdm seaborn opendatasets
+RUN pip install tensorflow==2.18.0 hydra-core ipykernel ipywidgets tqdm seaborn opendatasets mlflow
 
 # ENV VIRTUAL_ENV="$HOME/.venv" 
 # ENV PATH="$VIRTUAL_ENV/bin:$PATH"
