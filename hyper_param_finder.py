@@ -1,20 +1,38 @@
 
 import os
-from gc import callbacks
 from pathlib import Path
 
 import mlflow
 import optuna
+from numpy import dtype
+
+# override Optuna's default logging to ERROR only
+optuna.logging.set_verbosity(optuna.logging.ERROR)
+
 import pandas as pd
 import tensorflow as tf
+import tensorflow_addons as tfa
 from hydra import compose, initialize
+from tensorflow.keras import mixed_precision
 from tensorflow.keras.applications.densenet import DenseNet121
-from tensorflow.keras.layers import Dense, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.layers import (
+    Activation,
+    BatchNormalization,
+    Dense,
+    Dropout,
+    GlobalAveragePooling2D,
+)
 from tensorflow.keras.models import Model
 
 from model import build_DenseNet121
 from utils.utils import setup_evnironment_vars
 from utils.weighted_loss import get_weighted_loss
+
+# https://www.tensorflow.org/guide/mixed_precision
+mixed_precision.set_global_policy('mixed_float16')
+
+# _dtype=tf.float16
+
 
 tf.get_logger().setLevel('ERROR')
 tf.random.set_seed(42)
@@ -59,10 +77,10 @@ def load_image_valid(image_name, label):
     image = tf.io.read_file(full_path)
     image = tf.image.decode_jpeg(image, channels=3)
     image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])  # Resize to the desired size
-    label = tf.cast(label, tf.float32)
+    label = tf.cast(label,tf.float32)
     return image, label
 
-def get_preprocessed_dataset():
+def get_preprocessed_dataset(batch_size):
 
     sample_df = pd.read_csv(CSV_PATH)
     valid_csv= 'datasets/valid-small.csv'
@@ -124,7 +142,6 @@ def get_preprocessed_dataset():
         tf.keras.layers.RandomZoom(0.1, 0.1)])                   # Random zoom
 
     def preprocess_image(image, label):
-        image = tf.cast(image, tf.float32) #/ 255.0
         # image = tf.keras.applications.densenet.preprocess_input(image)
         image = normalization_layer(image)
         return image, label
@@ -132,12 +149,16 @@ def get_preprocessed_dataset():
 
     train_ds = train_ds.map(lambda image, label: (data_augmentation(image), label) , num_parallel_calls=AUTOTUNE)
     train_ds = train_ds.map(preprocess_image,num_parallel_calls=AUTOTUNE)
-    train_ds = train_ds.batch(BATCH_SIZE).shuffle(len(images_df))
+    train_ds = train_ds.batch(batch_size).shuffle(len(images_df))
     train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
 
     valid_ds = valid_ds.map(preprocess_image,num_parallel_calls=tf.data.AUTOTUNE)
-    valid_ds = valid_ds.batch(BATCH_SIZE)
+    valid_ds = valid_ds.batch(batch_size)
     valid_ds = valid_ds.prefetch(buffer_size=AUTOTUNE)
+
+    test_ds = test_ds.map(preprocess_image,num_parallel_calls=tf.data.AUTOTUNE)
+    test_ds = test_ds.batch(batch_size)
+    test_ds = test_ds.prefetch(buffer_size=AUTOTUNE)
 
     # Class Imbalance Handling
     # Compute Class Frequencies
@@ -151,13 +172,10 @@ def get_preprocessed_dataset():
 
     return train_ds, valid_ds, test_ds, pos_weights, neg_weights
 
-# override Optuna's default logging to ERROR only
-optuna.logging.set_verbosity(optuna.logging.ERROR)
+
 
 # define a logging callback that will report on only new challenger parameter configurations if a
 # trial has usurped the state of 'best conditions'
-
-
 def champion_callback(study, frozen_trial):
     """
     Logging callback that will report when a new trial iteration improves upon existing
@@ -184,38 +202,43 @@ def champion_callback(study, frozen_trial):
             print(f"Initial trial {frozen_trial.number} achieved value: {frozen_trial.value}")
 
 
+
+
 def create_model(trial):
     # We optimize the numbers of layers, their units and weight decay parameter.
-    n_layers = trial.suggest_int("n_layers", 1, 3)
+    n_layers = trial.suggest_int("n_layers", 1, 5)
     weight_decay = trial.suggest_float("weight_decay", 1e-10, 1e-3, log=True)
+    dropout_rate = trial.suggest_float("dropout_rate", 0.1, 0.5)
 
     base_model = DenseNet121(
         include_top=False,
         weights='pretrain_weights/densenet.hdf5', #'imagenet', 
-        input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3)  
+        input_shape= (IMAGE_SIZE, IMAGE_SIZE, 3)
     )
-    # base_model.trainable = False
-    x = base_model.output
+    base_model.trainable = True
+    for layer in base_model.layers[:-4]:
+        layer.trainable = False
 
+    x = base_model.output
     # add a global spatial average pooling layer
     x = GlobalAveragePooling2D()(x)
+
     for i in range(n_layers):
-        num_hidden = trial.suggest_int("n_units_l{}".format(i), 4, 128, log=True)
+        num_hidden = trial.suggest_int(name="n_units_l{}".format(i), 
+                                       low= 64, high = 512, log=True)
 
         x = tf.keras.layers.Dense(
                 num_hidden,
                 activation="relu",
                 kernel_regularizer=tf.keras.regularizers.l2(weight_decay),
             )(x)
-
         
-    # x = Dense(4096, activation='relu')(x)
-    # x = Dropout(0.3)(x)
-    # x = Dense(1024, activation='relu')(x)
-    # x = Dropout(0.3)(x)
-    
+        x = BatchNormalization()(x)
+        x = Dropout(dropout_rate)(x)
+        
     # and a logistic layer
-    predictions = Dense(len(LABELS), activation="sigmoid")(x)
+    x = Dense(len(LABELS), name='final_dense')(x)
+    predictions = Activation('sigmoid', dtype='float32', name='predictions')(x)
 
     return Model(inputs=base_model.input, outputs=predictions)
 
@@ -239,20 +262,31 @@ def create_optimizer(trial):
         kwargs["momentum"] = trial.suggest_float("sgd_opt_momentum", 1e-5, 1e-1, log=True)
 
     optimizer = getattr(tf.optimizers, optimizer_selected)(**kwargs)
+    optimizer = mixed_precision.LossScaleOptimizer(optimizer) # memory saving
     return optimizer
+
 
 def objective(trial):
     # Clear clutter from previous session graphs.
     tf.keras.backend.clear_session()
 
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor='val_AUC', 
+        patience=5, 
+        mode='max', 
+        restore_best_weights=True
+    )
+
+    # Hyperparameters to tune
+    batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
     with mlflow.start_run(nested=True):
-        # TODO: different batch size
-        train_ds, valid_ds, test_ds, pos_weights, neg_weights = get_preprocessed_dataset()
+        train_ds, valid_ds, test_ds, pos_weights, neg_weights = get_preprocessed_dataset(batch_size)
 
         METRICS = [
             'accuracy',
             tf.keras.metrics.Precision(name='precision'),
             tf.keras.metrics.Recall(name='recall'),
+            tfa.metrics.F1Score(num_classes=len(LABELS), average='macro'),
             tf.keras.metrics.AUC(name='AUC'), 
         ]
         model = create_model(trial)
@@ -263,17 +297,13 @@ def objective(trial):
         
         model.fit(train_ds, 
                     validation_data=valid_ds,
-                     callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_accuracy')],
+                     callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_AUC'),
+                                early_stopping],
                     epochs = NUM_EPOCHS)
 
         
-        # # Log to MLflow
-    # mlflow.log_params('params')
-    # mlflow.log_metric("mse", error)
-    # mlflow.log_metric("rmse", math.sqrt(error))
-    # Evaluate the model accuracy on the validation set.
     score = model.evaluate(test_ds, verbose=0)
-    return score[0]
+    return score[-1]  # val_AUC is at last
 
 def main()-> None:
     setup_evnironment_vars()
@@ -287,7 +317,7 @@ def main()-> None:
 
 
     mlflow.set_experiment("/hyper-param-tunning")
-    mlflow.tensorflow.autolog()
+    mlflow.tensorflow.autolog(log_models=True, log_datasets=False)
 
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=100, callbacks=[champion_callback])
