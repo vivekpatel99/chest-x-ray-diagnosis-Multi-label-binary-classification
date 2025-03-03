@@ -1,10 +1,9 @@
+# https://www.kaggle.com/code/mistag/keras-model-tuning-with-optuna#Objective-function
 
-import os
 from pathlib import Path
 
 import mlflow
 import optuna
-from numpy import dtype
 
 # override Optuna's default logging to ERROR only
 optuna.logging.set_verbosity(optuna.logging.ERROR)
@@ -203,7 +202,6 @@ def champion_callback(study, frozen_trial):
 
 
 
-
 def create_model(trial):
     # We optimize the numbers of layers, their units and weight decay parameter.
     n_layers = trial.suggest_int("n_layers", 1, 5)
@@ -238,6 +236,7 @@ def create_model(trial):
         
     # and a logistic layer
     x = Dense(len(LABELS), name='final_dense')(x)
+    # activation must be float32 for metrics such as f1 score and so on
     predictions = Activation('sigmoid', dtype='float32', name='predictions')(x)
 
     return Model(inputs=base_model.input, outputs=predictions)
@@ -281,6 +280,7 @@ def objective(trial):
     batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
     with mlflow.start_run(nested=True):
         train_ds, valid_ds, test_ds, pos_weights, neg_weights = get_preprocessed_dataset(batch_size)
+        mlflow.log_param({'batch_size':batch_size})
 
         METRICS = [
             'accuracy',
