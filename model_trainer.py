@@ -6,10 +6,8 @@ import mlflow
 import pandas as pd
 import tensorflow as tf
 from hydra import compose, initialize
-from tensorflow.keras.applications.densenet import DenseNet121
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
-from tensorflow.keras.models import Model
 
+from model import build_DenseNet121
 from utils.utils import setup_evnironment_vars
 from utils.weighted_loss import get_weighted_loss
 
@@ -86,10 +84,11 @@ def main()-> None:
     #        'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass', 'No Finding',
     #        'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
     # 'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
+    labels =['Atelectasis','Effusion','Infiltration', 'Mass','Nodule']
 
-    labels =['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
-        'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass',
-        'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
+    # labels =['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
+    #     'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass',
+    #     'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
 
 
     train_cat_labels_df = useful_data_df['Finding Labels'].str.get_dummies(sep='|').astype('float32')
@@ -158,27 +157,7 @@ def main()-> None:
     # ### Load and Prepare DenseNet121 Model
     #'imagenet',
 
-    base_model = DenseNet121(
-        include_top=False,
-        weights='pretrain_weights/densenet.hdf5', #'imagenet', 
-        input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3)  
-    )
-    # base_model.trainable = False
-
-
-    x = base_model.output
-
-    # add a global spatial average pooling layer
-    x = GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(4096, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.5)(x)
-    x = tf.keras.layers.Dense(1024, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.5)(x)
-    # and a logistic layer
-    predictions = Dense(len(labels), activation="sigmoid")(x)
-
-    model = Model(inputs=base_model.input, outputs=predictions)
-
+    model = build_DenseNet121(image_size=IMAGE_SIZE, num_classes=len(labels))
 
     METRICS = [
         'accuracy',
@@ -187,7 +166,7 @@ def main()-> None:
         tf.keras.metrics.AUC(name='AUC'), 
     ]
 
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), 
+    model.compile(optimizer=tf.keras.optimizers.Nadam(learning_rate=LEARNING_RATE), 
                 loss=get_weighted_loss(pos_weights, neg_weights),
             metrics=METRICS)     
 
@@ -207,13 +186,13 @@ def main()-> None:
         tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=3, min_lr=0.00001),
         tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True),
     ]
-    mlflow.set_experiment("/.mlfow_chest_xray")
+    mlflow.set_experiment("/mlfow_chest_xray")
 
     mlflow.tensorflow.autolog()
-    history = model.fit(train_ds, 
-                        validation_data=valid_ds,
-                        epochs = NUM_EPOCHS,
-                        callbacks=callbacks)
+    model.fit(train_ds, 
+            validation_data=valid_ds,
+            epochs = NUM_EPOCHS,
+            callbacks=callbacks)
 
 
 if __name__ == '__main__':
