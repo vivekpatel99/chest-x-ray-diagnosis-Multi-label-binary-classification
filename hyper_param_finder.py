@@ -1,6 +1,8 @@
 # https://www.kaggle.com/code/mistag/keras-model-tuning-with-optuna#Objective-function
 # https://github.com/optuna/optuna-examples/blob/main/tensorflow/tensorflow_eager_simple.py
 # https://mlflow.org/docs/latest/traditional-ml/hyperparameter-tuning-with-child-runs/notebooks/hyperparameter-tuning-with-child-runs.html
+# https://github.com/optuna/optuna-examples/blob/main/tensorflow/tensorflow_eager_simple.py
+# https://mlflow.org/docs/latest/traditional-ml/hyperparameter-tuning-with-child-runs/notebooks/hyperparameter-tuning-with-child-runs.html
 from pathlib import Path
 
 import mlflow
@@ -11,7 +13,7 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 
 import pandas as pd
 import tensorflow as tf
-# import tensorflow_addons as tfa
+import tensorflow_addons as tfa
 from hydra import compose, initialize
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.applications.densenet import DenseNet121
@@ -23,7 +25,6 @@ from tensorflow.keras.layers import (
     GlobalAveragePooling2D,
 )
 from tensorflow.keras.models import Model
-from utils.chest_x_ray_preprocessor import ChestXRayPreprocessor
 
 from utils.utils import setup_evnironment_vars
 from utils.weighted_loss import get_weighted_loss
@@ -59,6 +60,115 @@ LABELS =['Atelectasis','Effusion','Infiltration', 'Mass','Nodule']
 # labels =['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
 #     'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass',
 #     'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
+
+
+def load_image(image_name, label):
+    full_path = tf.strings.join([f'{TRAIN_IMG_DIR}/', image_name])
+    image = tf.io.read_file(full_path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])  # Resize to the desired size
+    label = tf.cast(label, tf.float32)
+    return image, label
+
+def load_image_valid(image_name, label):
+    full_path = tf.strings.join(['datasets/images-small/', image_name])
+    image = tf.io.read_file(full_path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])  # Resize to the desired size
+    label = tf.cast(label,tf.float32)
+    return image, label
+
+def get_preprocessed_dataset(batch_size):
+
+    sample_df = pd.read_csv(CSV_PATH)
+    valid_csv= 'datasets/valid-small.csv'
+    valid_df = pd.read_csv(f"{valid_csv}")
+    valid_df.drop('PatientId', axis=1, inplace=True)
+
+    test_csv='datasets/test.csv'
+    test_df = pd.read_csv(f"{test_csv}")
+    test_df.drop('PatientId', axis=1, inplace=True)
+
+    # Data Clean up
+    # Droping duplicates
+    sample_df.drop_duplicates(subset=['Patient ID'], inplace=True)
+    sample_labels = ['Image Index', 'Finding Labels']
+    sample_df = sample_df[sample_labels]
+
+    # Prepare new csv file with useful information and format
+    useful_data_df= sample_df[['Image Index', 'Finding Labels']]
+    useful_data_df = useful_data_df.dropna()
+    images_df = useful_data_df['Image Index'] 
+
+    # One hot encoding
+    train_cat_labels_df = useful_data_df['Finding Labels'].str.get_dummies(sep='|').astype('float32')
+    train_cat_labels_df = train_cat_labels_df[LABELS]
+    valid_images = valid_df.Image
+    valid_labels_df = valid_df[LABELS]
+
+    test_images = test_df.Image
+    test_labels_df = test_df[LABELS]
+
+    # Load Training Dataset from Dataframe
+    train_ds = tf.data.Dataset.from_tensor_slices((images_df,  train_cat_labels_df.values))
+    train_ds = train_ds.map(load_image, num_parallel_calls=AUTOTUNE)
+
+    valid_ds = tf.data.Dataset.from_tensor_slices((valid_images.values,  valid_labels_df.values))
+    valid_ds = valid_ds.map(load_image_valid, num_parallel_calls=AUTOTUNE)
+
+    test_ds = tf.data.Dataset.from_tensor_slices((test_images.values,  test_labels_df.values))
+    test_ds = test_ds.map(load_image_valid, num_parallel_calls=AUTOTUNE)
+
+    # ## Image Processing
+    # #### Normalization
+    # Create normalization layer
+    normalization_layer = tf.keras.layers.Normalization()
+    # Compute the mean and variance using the training data
+    # We need to convert the dataset to numpy to compute statistics
+    images_for_stats = []
+    for images, _ in train_ds.take(int(len(images_df)*0.25)): 
+        images_for_stats.append(images)
+    images_for_stats = tf.concat(images_for_stats, axis=0)
+    normalization_layer.adapt(images_for_stats)
+
+    # #### Augmentation 
+    data_augmentation = tf.keras.Sequential([
+        tf.keras.layers.RandomRotation(0.10),                    # Small rotation
+        tf.keras.layers.RandomTranslation(0.05, 0.05),           # Translation
+        tf.keras.layers.RandomContrast(0.1),                     # Contrast adjustment
+        tf.keras.layers.RandomBrightness(0.1),                   # Brightness adjustment
+        tf.keras.layers.RandomZoom(0.1, 0.1)])                   # Random zoom
+
+    def preprocess_image(image, label):
+        # image = tf.keras.applications.densenet.preprocess_input(image)
+        image = normalization_layer(image)
+        return image, label
+
+
+    train_ds = train_ds.map(lambda image, label: (data_augmentation(image), label) , num_parallel_calls=AUTOTUNE)
+    train_ds = train_ds.map(preprocess_image,num_parallel_calls=AUTOTUNE)
+    train_ds = train_ds.batch(batch_size).shuffle(len(images_df))
+    train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
+
+    valid_ds = valid_ds.map(preprocess_image,num_parallel_calls=tf.data.AUTOTUNE)
+    valid_ds = valid_ds.batch(batch_size)
+    valid_ds = valid_ds.prefetch(buffer_size=AUTOTUNE)
+
+    test_ds = test_ds.map(preprocess_image,num_parallel_calls=tf.data.AUTOTUNE)
+    test_ds = test_ds.batch(batch_size)
+    test_ds = test_ds.prefetch(buffer_size=AUTOTUNE)
+
+    # Class Imbalance Handling
+    # Compute Class Frequencies
+    N = train_cat_labels_df.shape[0]
+    positive_frequencies = (train_cat_labels_df==1).sum()/N
+    negative_frequencies = (train_cat_labels_df==0).sum()/N
+
+    pos_weights = negative_frequencies.values
+    neg_weights = positive_frequencies.values
+
+
+    return train_ds, valid_ds, test_ds, pos_weights, neg_weights
 
 
 
@@ -166,17 +276,16 @@ def objective(trial):
     )
 
     # Hyperparameters to tune
-    preprocessor = ChestXRayPreprocessor(cfg)
     batch_size = trial.suggest_categorical('batch_size', [8, 16])
     with mlflow.start_run(nested=True):
-        train_ds, valid_ds, test_ds, pos_weights, neg_weights = preprocessor.get_preprocessed_datasets(batch_size)
+        train_ds, valid_ds, test_ds, pos_weights, neg_weights = get_preprocessed_dataset(batch_size)
         mlflow.log_param('batch_size',batch_size)
 
         METRICS = [
             'accuracy',
             tf.keras.metrics.Precision(name='precision'),
             tf.keras.metrics.Recall(name='recall'),
-            tf.keras.metrics.F1Score(average='weighted'),
+            tfa.metrics.F1Score(num_classes=len(LABELS), average='macro'),
             tf.keras.metrics.AUC(name='AUC'), 
         ]
         model = create_model(trial)
