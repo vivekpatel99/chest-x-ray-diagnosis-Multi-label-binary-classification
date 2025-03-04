@@ -1,5 +1,6 @@
 # https://www.kaggle.com/code/mistag/keras-model-tuning-with-optuna#Objective-function
-
+# https://github.com/optuna/optuna-examples/blob/main/tensorflow/tensorflow_eager_simple.py
+# https://mlflow.org/docs/latest/traditional-ml/hyperparameter-tuning-with-child-runs/notebooks/hyperparameter-tuning-with-child-runs.html
 from pathlib import Path
 
 import mlflow
@@ -23,15 +24,11 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 
-from model import build_DenseNet121
 from utils.utils import setup_evnironment_vars
 from utils.weighted_loss import get_weighted_loss
 
 # https://www.tensorflow.org/guide/mixed_precision
 mixed_precision.set_global_policy('mixed_float16')
-
-# _dtype=tf.float16
-
 
 tf.get_logger().setLevel('ERROR')
 tf.random.set_seed(42)
@@ -277,10 +274,10 @@ def objective(trial):
     )
 
     # Hyperparameters to tune
-    batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
+    batch_size = trial.suggest_categorical('batch_size', [8, 16])
     with mlflow.start_run(nested=True):
         train_ds, valid_ds, test_ds, pos_weights, neg_weights = get_preprocessed_dataset(batch_size)
-        mlflow.log_param({'batch_size':batch_size})
+        mlflow.log_param('batch_size',batch_size)
 
         METRICS = [
             'accuracy',
@@ -307,7 +304,6 @@ def objective(trial):
 
 def main()-> None:
     setup_evnironment_vars()
-
 
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:

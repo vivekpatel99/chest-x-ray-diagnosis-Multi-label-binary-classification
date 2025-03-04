@@ -84,9 +84,9 @@
 			]
 		}
 	},
-	"containerUser": "ubuntu",
+	// "containerUser": "ubuntu",
 	// 6. Set `remoteUser` to `root` to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-	// "remoteUser": "builder",
+	"remoteUser": "ubuntu",
 	"updateRemoteUserUID": true,
 	// the following commands are related to container lifecylce. More info: https://containers.dev/implementors/json_reference/#lifecycle-scripts
 	// 7. Use 'initializeCommand' to run commands ON THE HOST before container is created or started.
@@ -100,7 +100,7 @@
 	// 10. Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "sudo chown -R $USER:$USER /code",
 	// 11. Use 'postStartCommand' to run a command each time the container starts successfully.
-	"postStartCommand": "sudo chown -R $USER:$USER /workspaces",
+	// "postStartCommand": "sudo chown -R $USER:$USER /workspaces",
 	// 12. Use 'postAttachCommand' to run a command each time a tool attaches to the container successfully. 
 	// "postAttachCommand": "",
 }
