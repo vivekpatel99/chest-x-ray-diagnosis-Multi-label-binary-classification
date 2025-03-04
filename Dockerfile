@@ -28,12 +28,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 USER $USERNAME
 WORKDIR $HOME
 
-# RUN pip install tensorflow==2.18.0 hydra-core ipykernel ipywidgets tqdm seaborn opendatasets mlflow optuna optuna-integration[tfkeras]
+RUN pip install tensorflow==2.18.0 hydra-core ipykernel ipywidgets tqdm seaborn opendatasets mlflow optuna optuna-integration[tfkeras]
 
-ENV VIRTUAL_ENV="$HOME/.venv" 
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# ENV VIRTUAL_ENV="$HOME/.venv" 
+# ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-COPY pyproject.toml .
-RUN uv sync --active 
+# COPY pyproject.toml .
+# RUN uv sync --active 
 
 

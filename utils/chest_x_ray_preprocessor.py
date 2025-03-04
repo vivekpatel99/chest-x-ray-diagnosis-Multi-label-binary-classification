@@ -55,6 +55,7 @@ class ChestXRayPreprocessor:
         new_train_df = train_df[self.TRAIN_CSV_LABELS]
         train_categorical_labels_df = new_train_df[self.TRAIN_CSV_LABELS[1]].str.get_dummies(sep='|').astype('float32')
         train_images_df = new_train_df['Image Index'] 
+        train_categorical_labels_df = train_categorical_labels_df[self.LABELS]
         return train_images_df, train_categorical_labels_df
 
     def normalize_image(self, image, label):

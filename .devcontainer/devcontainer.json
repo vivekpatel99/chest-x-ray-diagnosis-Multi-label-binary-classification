@@ -62,7 +62,7 @@
 		"vscode": {
 			// Set *default* container specific settings.json values on container create.
 			"settings": {
-				"python.defaultInterpreterPath": "$HOME/.venv/bin/python",
+				"python.defaultInterpreterPath": "/usr/local/python/current/bin/python",
 				"terminal.integrated.shell.linux": "/bin/bash",
 				"terminal.integrated.defaultProfile.linux": "bash"
 			},
@@ -80,7 +80,8 @@
 				"ms-toolsai.tensorboard",
 				"charliermarsh.ruff",
 				"VisualStudioExptTeam.vscodeintellicode",
-				"Codeium.codeium"
+				"Codeium.codeium",
+				"RSIP-Vision.nvidia-smi-plus"
 			]
 		}
 	},
