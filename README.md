@@ -1,7 +1,13 @@
 # chest-x-ray-diagnosis
 
 ## Project Overview
-ChestXpert is a state-of-the-art deep learning system designed to analyze chest X-ray images and detect multiple pathological conditions simultaneously. Built on DenseNet121 architecture and trained from scratch, this system achieves clinical-grade accuracy across 14 different chest conditions, making it a powerful tool for radiological diagnosis assistance.
+[ChestX-ray8 dataset](https://arxiv.org/abs/1705.02315) which contains 108,948 frontal-view X-ray images of 32,717 unique patients. 
+- Each image in the data set contains multiple text-mined labels identifying 14 different pathological conditions. 
+- These in turn can be used by physicians to diagnose 8 different diseases. 
+- We will use this data to develop a single model that will provide binary classification predictions for each of the 14 labeled pathologies. 
+- In other words it will predict 'positive' or 'negative' for each of the pathologies.
+
+- Sample datasets is downloaded from [kaggle](https://www.kaggle.com/datasets/nih-chest-xrays/sample)
 
 ![alt text](resources/random_images.png)
 
@@ -97,6 +103,7 @@ hyperparameter_space = {
 
 ## 🛠️ Technologies Used
 - tensorflow:25.02-tf2-py3 Docker image from [Nvidia](https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel-25-01.html#) to avoid GPU detection errors by Tensorflow
+- MLflow and optuna to find best Hyper parameters 
 
 ## 🚀 Future Enhancements
 - use multiple models such as Mobilenetv3, inceptionresnetv2 and so on
@@ -107,6 +114,9 @@ hyperparameter_space = {
 1. Clone the Repo
 2. Install vs code with [docker](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-docker) and [devcontainer](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension
 3. press `Ctrl+Shift+P` and select `Dev Containers: Rebuild and Reopen in Container`
+4. setup .env file with kaggle keys to download dataset directly (move it into datasets dir)
+5. open conf/config.yaml for configuring parameters and path
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
