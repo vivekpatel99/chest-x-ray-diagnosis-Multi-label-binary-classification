@@ -1,7 +1,8 @@
 DATASET_DIRS:
   DATASET_DIR: "datasets"
-  IMAGES_DIR: ${DATASET_DIRS.DATASET_DIR}/images-small/
-  TRAIN_CSV: ${DATASET_DIRS.DATASET_DIR}/train-small.csv
+  TRAIN_IMAGES_DIR: ${DATASET_DIRS.DATASET_DIR}/sample/sample/images
+  TEST_IMAGE_DIR: ${DATASET_DIRS.DATASET_DIR}/images-small
+  TRAIN_CSV: ${DATASET_DIRS.DATASET_DIR}/sample/sample_labels.csv
   VALID_CSV: ${DATASET_DIRS.DATASET_DIR}/valid-small.csv
   TEST_CSV: ${DATASET_DIRS.DATASET_DIR}/test.csv
 

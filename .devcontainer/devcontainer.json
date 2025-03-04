@@ -62,7 +62,7 @@
 		"vscode": {
 			// Set *default* container specific settings.json values on container create.
 			"settings": {
-				"python.defaultInterpreterPath": "/usr/bin/python",
+				"python.defaultInterpreterPath": "$HOME/.venv/bin/python",
 				"terminal.integrated.shell.linux": "/bin/bash",
 				"terminal.integrated.defaultProfile.linux": "bash"
 			},

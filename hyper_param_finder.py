@@ -272,7 +272,7 @@ def objective(trial):
         mode='max', 
         restore_best_weights=True
     )
-
+    ChestXRayPreprocessor()
     # Hyperparameters to tune
     batch_size = trial.suggest_categorical('batch_size', [8, 16])
     with mlflow.start_run(nested=True):
