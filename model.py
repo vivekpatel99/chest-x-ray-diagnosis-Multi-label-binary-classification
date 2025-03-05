@@ -1,11 +1,11 @@
 
-from tensorflow.keras.applications.densenet import DenseNet121, DenseNet201
+from tensorflow.keras.applications.densenet import DenseNet121
 from tensorflow.keras.layers import Activation, Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 
 
 def build_DenseNet121(input_shape:tuple, num_classes:int):
-    base_model = DenseNet201(
+    base_model = DenseNet121(
             include_top=False,
             weights=None, # input will be grayscale images
             input_shape=input_shape  

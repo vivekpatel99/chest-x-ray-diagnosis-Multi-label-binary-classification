@@ -59,7 +59,7 @@ def main()-> None:
         tf.keras.metrics.AUC(name='AUC'), 
     ]
 
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE), 
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE, momentum=0.9, nesterov=True), 
                 loss=get_weighted_loss(pos_weights, neg_weights),
             metrics=METRICS)     
 
@@ -70,8 +70,8 @@ def main()-> None:
                                             save_best_only=True,
                                             monitor='val_loss',
                                             mode='min'),
-        tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=3, min_lr=0.00001),
-        tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
+        tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=5, min_lr=0.00001),
+        tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
     ]
     mlflow.set_experiment("/chest_xray_training_densenet121")
 
@@ -99,7 +99,7 @@ def main()-> None:
                     label=f'{labels[i]} - AUC = {round(roc_score_per_label, 3)}')
 
             axs.set_xlabel('False Positive Rate')
-            axs.set_xlabel('True Positive Rate')
+            axs.set_ylabel('True Positive Rate')
             axs.legend(loc='lower right')
         except:
             log.error(
