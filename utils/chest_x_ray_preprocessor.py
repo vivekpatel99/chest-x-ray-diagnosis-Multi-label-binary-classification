@@ -27,6 +27,7 @@ class ChestXRayPreprocessor:
         self.config = config
         self.batch_size:int = config.TRAIN.BATCH_SIZE
         self.dataset_len:int = 0 
+        self.image_size:int = config.TRAIN.IMG_SIZE
         if labels:
             self.LABELS = labels
         else:
@@ -47,7 +48,11 @@ class ChestXRayPreprocessor:
         full_path = tf.strings.join([img_dir, '/', image_name])
         image = tf.io.read_file(full_path)
         image = tf.io.decode_png(image, channels=1)
-        image = tf.image.resize(image, [self.config.TRAIN.IMG_SIZE, self.config.TRAIN.IMG_SIZE])
+        image = tf.image.resize(image, 
+                                [self.image_size, self.image_size], 
+                                preserve_aspect_ratio=True,  
+                                antialias=True)
+
         label = tf.cast(label, tf.float32)
         return image, label
 
@@ -82,7 +87,8 @@ class ChestXRayPreprocessor:
         return image, label
 
     def _normlization_layer_adapt(self, dataset_len:int, train_ds:tf.data.Dataset) -> None:
-        images_for_stats =  tf.concat([images for images, _ in train_ds.take(int(dataset_len *0.30))], axis=0) 
+        # images_for_stats =  tf.concat([images for images, _ in train_ds.take(int(dataset_len *0.30))], axis=0) 
+        images_for_stats =  tf.concat([images for images, _ in train_ds.as_numpy_iterator()], axis=0) 
         self.normalization_layer.adapt(images_for_stats)
 
     def get_preprocessed_datasets(self, batch_size:int|None=None) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset, tf.Tensor, tf.Tensor]:

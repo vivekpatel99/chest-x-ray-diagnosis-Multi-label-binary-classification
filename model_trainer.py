@@ -59,9 +59,9 @@ def main()-> None:
         tf.keras.metrics.AUC(name='AUC'), 
     ]
 
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE, momentum=0.9, nesterov=True), 
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE, momentum=0.9), 
                 loss=get_weighted_loss(pos_weights, neg_weights),
-            metrics=METRICS)     
+                metrics=METRICS)     
 
     callbacks = [
         tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
@@ -70,7 +70,11 @@ def main()-> None:
                                             save_best_only=True,
                                             monitor='val_loss',
                                             mode='min'),
-        tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=5, min_lr=0.00001),
+        tf.keras.callbacks.ReduceLROnPlateau(monitor='val_auc', 
+                                             factor=0.1, 
+                                             patience=5, 
+                                             mode="max", 
+                                             min_lr=1e-6),
         tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
     ]
     mlflow.set_experiment("/chest_xray_training_densenet121")
