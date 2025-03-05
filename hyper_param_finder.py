@@ -9,9 +9,7 @@ import optuna
 # override Optuna's default logging to ERROR only
 optuna.logging.set_verbosity(optuna.logging.ERROR)
 
-import pandas as pd
 import tensorflow as tf
-# import tensorflow_addons as tfa
 from hydra import compose, initialize
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.applications.densenet import DenseNet121
@@ -23,8 +21,8 @@ from tensorflow.keras.layers import (
     GlobalAveragePooling2D,
 )
 from tensorflow.keras.models import Model
-from utils.chest_x_ray_preprocessor import ChestXRayPreprocessor
 
+from utils.chest_x_ray_preprocessor import ChestXRayPreprocessor
 from utils.utils import setup_evnironment_vars
 from utils.weighted_loss import get_weighted_loss
 
@@ -36,7 +34,6 @@ tf.random.set_seed(42)
 AUTOTUNE = tf.data.AUTOTUNE
 
 # https://gist.github.com/bdsaglam/586704a98336a0cf0a65a6e7c247d248
-
 with initialize(version_base=None, config_path="conf"):
     cfg = compose(config_name="config")
 
@@ -66,6 +63,7 @@ LABELS =['Atelectasis','Effusion','Infiltration', 'Mass','Nodule']
 # trial has usurped the state of 'best conditions'
 def champion_callback(study, frozen_trial):
     """
+    https://mlflow.org/docs/latest/traditional-ml/hyperparameter-tuning-with-child-runs/notebooks/hyperparameter-tuning-with-child-runs.html
     Logging callback that will report when a new trial iteration improves upon existing
     best trial values.
 
@@ -75,7 +73,6 @@ def champion_callback(study, frozen_trial):
     The race conditions with file system state management for distributed trials will render
     inconsistent values with this callback.
     """
-
     winner = study.user_attrs.get("winner", None)
 
     if study.best_value and winner != study.best_value:

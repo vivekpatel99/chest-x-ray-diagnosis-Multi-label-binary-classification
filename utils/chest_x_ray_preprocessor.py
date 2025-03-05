@@ -1,5 +1,9 @@
+from typing import Any
+
 import pandas as pd
 import tensorflow as tf
+from polars import Date
+
 
 class ChestXRayPreprocessor:
     def __init__(self, config, labels:list|None=None):
@@ -27,7 +31,7 @@ class ChestXRayPreprocessor:
         img_dir = self.config.DATASET_DIRS.TRAIN_IMAGES_DIR if is_training else self.config.DATASET_DIRS.TEST_IMAGE_DIR
         full_path = tf.strings.join([img_dir, '/', image_name])
         image = tf.io.read_file(full_path)
-        image = tf.io.decode_png(image, channels=3)
+        image = tf.io.decode_png(image, channels=1)
         image = tf.image.resize(image, [self.config.TRAIN.IMG_SIZE, self.config.TRAIN.IMG_SIZE])
         label = tf.cast(label, tf.float32)
         return image, label
@@ -62,11 +66,11 @@ class ChestXRayPreprocessor:
         image = self.normalization_layer(image)
         return image, label
 
-    def _normlization_layer_adapt(self, dataset_len:int, train_ds:tf.data.Dataset):
+    def _normlization_layer_adapt(self, dataset_len:int, train_ds:tf.data.Dataset) -> None:
         images_for_stats =  tf.concat([images for images, _ in train_ds.take(int(dataset_len *0.25))], axis=0) 
         self.normalization_layer.adapt(images_for_stats)
 
-    def get_preprocessed_datasets(self, batch_size:int|None=None):
+    def get_preprocessed_datasets(self, batch_size:int|None=None) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset, tf.TensorArray, tf.TensorArray]:
         train_df, valid_df, test_df = self._load_dataframes()
         train_images_df, train_categorical_labels_df  = self.train_df_clean_up(train_df)
         train_ds = tf.data.Dataset.from_tensor_slices((train_images_df.values, train_categorical_labels_df.values))
@@ -90,11 +94,11 @@ class ChestXRayPreprocessor:
 
         return train_ds, valid_ds, test_ds, pos_weights, neg_weights
 
-    def _load_dataframes(self):
+    def _load_dataframes(self)-> list[pd.DataFrame]:
         # Load and preprocess your dataframes here
         # This is a placeholder implementation
         train_df = pd.read_csv(self.config.DATASET_DIRS.TRAIN_CSV)
         valid_df = pd.read_csv(self.config.DATASET_DIRS.VALID_CSV)
         test_df = pd.read_csv(self.config.DATASET_DIRS.TEST_CSV)
         
-        return train_df, valid_df, test_df
+        return [train_df, valid_df, test_df]

@@ -1,28 +1,22 @@
 
-from tensorflow.keras.applications.densenet import DenseNet121
-from tensorflow.keras.layers import Dense, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.applications.densenet import DenseNet121, DenseNet201
+from tensorflow.keras.layers import Activation, Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 
 
-def build_DenseNet121(image_size:int, num_classes:int):
-    base_model = DenseNet121(
+def build_DenseNet121(input_shape:tuple, num_classes:int):
+    base_model = DenseNet201(
             include_top=False,
-            weights='pretrain_weights/densenet.hdf5', #'imagenet', 
-            input_shape=(image_size, image_size, 3)  
+            weights=None, # input will be grayscale images
+            input_shape=input_shape  
         )
     # base_model.trainable = False
-
-
     x = base_model.output
-
     # add a global spatial average pooling layer
     x = GlobalAveragePooling2D()(x)
-    x = Dense(4096, activation='relu')(x)
-    x = Dropout(0.3)(x)
-    x = Dense(1024, activation='relu')(x)
-    x = Dropout(0.3)(x)
-    
     # and a logistic layer
-    predictions = Dense(num_classes, activation="sigmoid")(x)
+    x = Dense(units=int(num_classes), name='final_dense')(x)
+    # activation must be float32 for metrics such as f1 score and so on
+    predictions = Activation('sigmoid', dtype='float32', name='predictions')(x)
 
     return  Model(inputs=base_model.input, outputs=predictions)
