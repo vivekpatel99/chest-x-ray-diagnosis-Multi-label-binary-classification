@@ -1,6 +1,6 @@
 # This assumes the container is running on a system with a CUDA GPU
 #ähttps://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel-25-01.html
-FROM nvcr.io/nvidia/tensorflow:25.02-tf2-py3
+FROM nvcr.io/nvidia/tensorflow:25.01-tf2-py3
 
 # Set DEBIAN_FRONTEND temporarily for build-time only
 ARG DEBIAN_FRONTEND=noninteractive

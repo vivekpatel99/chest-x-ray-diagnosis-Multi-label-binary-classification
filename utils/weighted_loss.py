@@ -28,7 +28,6 @@ def get_weighted_loss(pos_weights, neg_weights, epsilon=1e-7):
         for i in range(len(pos_weights)):
             y = y_true[:, i]
             f_of_x = y_pred[:, i]
-
             f_of_x_log = K.log(f_of_x + epsilon)
             f_of_x_1_min_log = K.log((1-f_of_x) + epsilon)
 

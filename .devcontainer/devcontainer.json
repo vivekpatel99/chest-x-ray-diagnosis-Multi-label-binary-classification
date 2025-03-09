@@ -23,8 +23,7 @@
 		"memlock=-1:-1",
 		"--ulimit",
 		"nofile=65536:65536",
-		"--shm-size",
-		"2g"
+		"--ipc=host" // provide max shared memory or "--shm-size=24g"
 	],
 	// 4. Features to add to the Dev Container. More info: https://containers.dev/implementors/features.
 	"features": {
