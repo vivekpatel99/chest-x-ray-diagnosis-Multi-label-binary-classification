@@ -66,23 +66,21 @@ def main()-> None:
                 metrics=METRICS)     
 
 
-    class Monitor(Enum):
-        to_monitor = 'val_loss'
-        mode = 'min'
-
+    to_monitor = 'val_loss'
+    mode = 'min'
     callbacks = [
         tf.keras.callbacks.ReduceLROnPlateau(factor=0.1, 
                                              patience=2, 
-                                             monitor=Monitor.to_monitor.name,
-                                             mode=Monitor.mode.name,
+                                             monitor=to_monitor,
+                                             mode=mode,
                                              min_lr=1e-6,
                                              verbose=1),
 
         tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(str(CHECK_POINT_DIR), "ckpt_{epoch}") ,
                                             save_weights_only=False,
                                             save_best_only=True,
-                                            monitor=Monitor.to_monitor.name,
-                                            mode=Monitor.mode.name,
+                                            monitor=to_monitor,
+                                            mode=mode,
                                             verbose=1),
         # tf.keras.callbacks.EarlyStopping(monitor=MONITOR[0], 
         #                                 patience=10,
