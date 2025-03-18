@@ -77,20 +77,6 @@ def get_weighted_loss(pos_weights, neg_weights, epsilon=1e-7):
 
 ```
 
-### Hyperparameter Optimization
-
-A comprehensive hyperparameter tuning framework explores:
-
-```python
-hyperparameter_space = {
-    'optimizer': ["RMSprop", "Adam", "SGD"],
-    'learning_rate': 1e-5 - 1e-1,
-    'batch_size': [8,16],
-    'num_dense_layers':1-5,
-    'dense_neurons': 64-512,
-    'dropout_rate': [0.1, 0.3, 0.5]
-}
-```
 
 ## 📊 Performance Highlights
 

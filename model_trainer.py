@@ -12,6 +12,20 @@
 """
 # ## Imports
 import os
+import logging
+from pathlib import Path
+
+import mlflow
+import numpy as np
+import opendatasets as od
+from hydra import compose, initialize
+from mlflow.models.signature import ModelSignature
+from mlflow.types.schema import Schema, TensorSpec
+
+from src.data_loader.chest_x_ray_preprocessor import ChestXRayPreprocessor
+from src.model.model import build_DenseNet121
+from src.utils.logs import get_logger
+from src.weighted_loss.weighted_loss import get_weighted_loss
 
 # Set environment variables
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
@@ -19,29 +33,10 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
 import tensorflow as tf
-from arrow import get
 
 tf.get_logger().setLevel('ERROR')
 tf.random.set_seed(42)
 
-
-
-
-import logging
-from pathlib import Path
-
-import matplotlib.pyplot as plt
-import mlflow
-import opendatasets as od
-import pandas as pd
-import seaborn as sns
-from hydra import compose, initialize
-from tensorflow.keras import backend as K
-
-from src.data_loader.chest_x_ray_preprocessor import ChestXRayPreprocessor
-from src.model.model import build_DenseNet121
-from src.utils.logs import get_logger
-from src.weighted_loss.weighted_loss import get_weighted_loss
 
 # https://gist.github.com/bdsaglam/586704a98336a0cf0a65a6e7c247d248
 
@@ -58,7 +53,7 @@ LEARNING_RATE = cfg.TRAIN.LEARNING_RATE
 CHECK_POINT_DIR = 'exported_models'
 LOG_DIR = 'logs'
 
-def main():
+def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
@@ -103,9 +98,7 @@ def main():
                 loss=get_weighted_loss(pos_weights, neg_weights),
             metrics=METRICS)     
 
-
     callbacks = get_callbacks(to_monitor, mode)
-
 
     model.fit(train_ds, 
             validation_data=valid_ds,
@@ -117,9 +110,32 @@ def main():
     test_ds = preprocessor.get_test_dataset()
     result = model.evaluate(test_ds, return_dict=True)
     mlflow.log_metrics(result)
+    log.info(f"Test results: {result}")
 
 
+    # 1. Input Schema
+    # -----------------
+    # Your input is a batch of images with shape (32, 240, 240, 3)
+    # We use -1 to indicate that the batch size can vary.
+    input_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, IMAGE_SIZE, IMAGE_SIZE, 1), "image")])
 
+    # 2. Output Schema - Multilabel binary classification head
+    # ------------------
+    # Your model outputs a list of two arrays. We need to define a schema for each.
+    # Array 1: Shape (1, 3)
+    output_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, len(CLASSES_NAME)), "classification")])
+
+    # 3. Model Signature
+    # --------------------
+    # Combine the input and output schemas into a ModelSignature
+    signature = ModelSignature(inputs=input_schema, outputs=output_schema)
+    mlflow.tensorflow.log_model(
+        model,
+        "my_model",
+        signature=signature,
+        code_paths=["src"],
+    )
+    
 
 
 def get_callbacks(to_monitor, mode):

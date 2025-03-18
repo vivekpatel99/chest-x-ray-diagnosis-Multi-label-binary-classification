@@ -1,42 +1,65 @@
-from tensorflow.keras import backend as K
+import numpy as np
+import tensorflow as tf
+import tensorflow.keras.backend as K
 
 
-def get_weighted_loss(pos_weights, neg_weights, epsilon=1e-7):
+def compute_class_weights(labels) -> tuple[np.ndarray, np.ndarray]:
     """
-    Return weighted loss function given negative weights and positive weights.
+    Note: Imported from the AI for Medicine Specialization course on Coursera: Assignment 1 Week 1.
+    Compute positive and negative weights for each class.
 
     Args:
-      pos_weights (np.array): array of positive weights for each class, size (num_classes)
-      neg_weights (np.array): array of negative weights for each class, size (num_classes)
-    
+        labels (np.array): matrix of labels, size (num_examples, num_classes)
+
+    Returns:
+        positive_weights (np.array): array of positive weights for each
+                                         class, size (num_classes)
+        negative_weights (np.array): array of negative weights for each
+                                         class, size (num_classes)
+    """
+    # total number of patients (rows).
+    N = labels.shape[0]
+
+    positive_frequencies = np.sum(labels, axis=0) / N
+    negative_frequencies = np.sum(labels == 0, axis=0) / N
+
+    positive_weights = negative_frequencies
+    negative_weights = positive_frequencies
+
+    return (positive_weights, negative_weights)
+
+@tf.keras.saving.register_keras_serializable()
+def get_weighted_loss(positive_weights, negative_weights, epsilon=1e-7):
+    """
+    Note: Imported from the AI for Medicine Specialization course on Coursera: Assignment 1 Week 1.
+    Returns weighted binary cross entropy loss function given negative weights and positive weights.
+
+    Args:
+      positive_weights (np.array): array of positive weights for each class, size (num_classes)
+      negative_weights (np.array): array of negative weights for each class, size (num_classes)
+
     Returns:
       weighted_loss (function): weighted loss function
     """
+    @tf.keras.saving.register_keras_serializable()
     def weighted_loss(y_true, y_pred):
         """
-        Return weighted loss value. 
+        Returns weighted binary cross entropy loss value.
 
         Args:
             y_true (Tensor): Tensor of true labels, size is (num_examples, num_classes)
             y_pred (Tensor): Tensor of predicted labels, size is (num_examples, num_classes)
+
         Returns:
-            loss (float): overall scalar loss summed across all classes
+            loss (Tensor): overall scalar loss summed across all classes
         """
         # initialize loss to zero
         loss = 0.0
 
-        for i in range(len(pos_weights)):
-            y = y_true[:, i]
-            f_of_x = y_pred[:, i]
-            f_of_x_log = K.log(f_of_x + epsilon)
-            f_of_x_1_min_log = K.log((1-f_of_x) + epsilon)
-
-            first_term = pos_weights[i] * y * f_of_x_log
-            sec_term = neg_weights[i] * (1-y) * f_of_x_1_min_log
-            loss_per_col = - K.mean(first_term + sec_term)
-            loss += loss_per_col
+        for i in range(len(positive_weights)):
+            # for each class, add average weighted loss for that class
+            loss += -1 * K.mean((positive_weights[i] * y_true[:, i] * K.log(y_pred[:, i] + epsilon) +
+                                 negative_weights[i] * (1 - y_true[:, i]) * K.log(1 - y_pred[:, i] + epsilon)))
         return loss
 
     return weighted_loss
-
-
