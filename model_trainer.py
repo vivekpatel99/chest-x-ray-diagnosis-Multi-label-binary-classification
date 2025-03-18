@@ -1,140 +1,149 @@
 
-import logging
+""""
+# # NIH Chest X-ray Multi label Binary classification using Tensorflow Densenet121 (Transfer learning)
+    # drop_colums = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
+    #        'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass', 'No Finding',
+    #        'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
+    # 'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
+
+    # labels =['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
+    #        'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass',
+    #        'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
+"""
+# ## Imports
 import os
-from enum import Enum
 
-import mlflow
-import numpy as np
-import pandas as pd
+# Set environment variables
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+
 import tensorflow as tf
-from hydra import compose, initialize
-from matplotlib import pyplot as plt
-from sklearn import metrics
+from arrow import get
 
-from model import build_DenseNet121
-from utils.chest_x_ray_preprocessor import ChestXRayPreprocessor
-from utils.logs import get_logger
-from utils.utils import setup_evnironment_vars
-from utils.weighted_loss import get_weighted_loss
-
-# https://www.tensorflow.org/guide/mixed_precision
-tf.keras.mixed_precision.set_global_policy('mixed_float16')
 tf.get_logger().setLevel('ERROR')
 tf.random.set_seed(42)
 
 
-def main()-> None:
+
+
+import logging
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import mlflow
+import opendatasets as od
+import pandas as pd
+import seaborn as sns
+from hydra import compose, initialize
+from tensorflow.keras import backend as K
+
+from src.data_loader.chest_x_ray_preprocessor import ChestXRayPreprocessor
+from src.model.model import build_DenseNet121
+from src.utils.logs import get_logger
+from src.weighted_loss.weighted_loss import get_weighted_loss
+
+# https://gist.github.com/bdsaglam/586704a98336a0cf0a65a6e7c247d248
+
+with initialize(version_base=None, config_path="conf"):
+    cfg = compose(config_name="config")
+    print(cfg.DATASET_DIRS.TRAIN_IMAGES_DIR)
+
+
+# ## Constants
+IMAGE_SIZE = cfg.TRAIN.IMG_SIZE
+BATCH_SIZE = cfg.TRAIN.BATCH_SIZE
+NUM_EPOCHS = cfg.TRAIN.NUM_EPOCHS
+LEARNING_RATE = cfg.TRAIN.LEARNING_RATE
+CHECK_POINT_DIR = 'exported_models'
+LOG_DIR = 'logs'
+
+def main():
     log = get_logger(__name__, log_level=logging.INFO)
-    setup_evnironment_vars()
-    log.info('setup_evnironment_vars done')
-
-    # https://gist.github.com/bdsaglam/586704a98336a0cf0a65a6e7c247d248
-    with initialize(version_base=None, config_path="conf"):
-        cfg = compose(config_name="config")
-
-    BATCH_SIZE = cfg.TRAIN.BATCH_SIZE
-    IMAGE_SIZE = cfg.TRAIN.IMG_SIZE
-    LEARNING_RATE = cfg.TRAIN.LEARNING_RATE
-    NUM_EPOCHS = cfg.TRAIN.NUM_EPOCHS
-    LOG_DIR = cfg.OUTPUTS.LOG_DIR
-    CHECK_POINT_DIR = cfg.OUTPUTS.CHECKPOINT_PATH
-    # INPUT_SHAPE = cfg.TRAIN.INPUT_SHAPE
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
-        log.error("No GPU found")
+        log.info("No GPU found")
         raise Exception("No GPU found")
-    else:
-        log.info(f'{found_gpu=}, {tf.__version__=}')
- 
-    labels =['Atelectasis','Effusion','Infiltration','Nodule']
-    preprocessor = ChestXRayPreprocessor(cfg, labels=labels)
-    train_ds, valid_ds, pos_weights, neg_weights = preprocessor.get_training_and_validation_datasets(BATCH_SIZE)
+    
+    # Look into the data directory
+    datasets = 'datasets/sample'
+    dataset_path = Path(datasets)
+    dataset_path.mkdir(parents=True, exist_ok=True)
+    if not dataset_path.is_dir():
+        log.info("Downloading the dataset")
+        dataset_url = 'https://www.kaggle.com/datasets/nih-chest-xrays/sample'
+        od.download(dataset_url)
 
-    # Model Development
-    model = build_DenseNet121(input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1), num_classes=len(labels))
+    CLASSES_NAME = ['Atelectasis','Effusion','Infiltration', 'Mass']#,'Nodule']
+
+    preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
+    train_ds, valid_ds, pos_weights, neg_weights = preprocessor.get_training_and_validation_datasets()
+
+    to_monitor = 'val_AUC'
+    mode = 'max'
+    mlflow.tensorflow.autolog(log_models=True, 
+                            log_datasets=False, 
+                            log_input_examples=True,
+                            log_model_signatures=True,
+                            keras_model_kwargs={"save_format": "keras"},
+                            checkpoint_monitor=to_monitor, 
+                            checkpoint_mode=mode)
+
+    model = build_DenseNet121(input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1), num_classes=len(CLASSES_NAME))
+    log.info(f"Model summary: {model.summary()}")
 
     METRICS = [
-        'accuracy',
         'binary_accuracy',
-        tf.keras.metrics.AUC(name='AUC',
-                             multi_label=True), 
-        tf.keras.metrics.F1Score(average='weighted'),
+        tf.keras.metrics.Precision(name='precision'),
+        tf.keras.metrics.Recall(name='recall'),
+        tf.keras.metrics.AUC(name='AUC'), 
     ]
 
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), 
+    model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate=LEARNING_RATE), 
                 loss=get_weighted_loss(pos_weights, neg_weights),
-                metrics=METRICS)     
+            metrics=METRICS)     
 
 
-    to_monitor = 'val_loss'
-    mode = 'min'
-    callbacks = [
-        tf.keras.callbacks.ReduceLROnPlateau(factor=0.1, 
-                                             patience=2, 
-                                             monitor=to_monitor,
-                                             mode=mode,
-                                             min_lr=1e-6,
-                                             verbose=1),
+    callbacks = get_callbacks(to_monitor, mode)
 
-        tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(str(CHECK_POINT_DIR), "ckpt_{epoch}") ,
-                                            save_weights_only=False,
-                                            save_best_only=True,
-                                            monitor=to_monitor,
-                                            mode=mode,
-                                            verbose=1),
-        # tf.keras.callbacks.EarlyStopping(monitor=MONITOR[0], 
-        #                                 patience=10,
-        #                                 mode=MONITOR[0], 
-        #                                 restore_best_weights=True),
 
-    ]
-    
-    mlflow.set_experiment("/chest_xray_training_densenet121")
-
-    # mlflow.log_params({
-    #     "batch_size": BATCH_SIZE,
-    #     "image_size": IMAGE_SIZE,
-    #     "learning_rate": LEARNING_RATE,
-    # })
-    mlflow.tensorflow.autolog(log_models=True, log_datasets=False)
     model.fit(train_ds, 
             validation_data=valid_ds,
-            epochs = NUM_EPOCHS,
             batch_size=BATCH_SIZE,
+            epochs = NUM_EPOCHS,
             callbacks=callbacks)
+
+    preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
+    test_ds = preprocessor.get_test_dataset()
+    result = model.evaluate(test_ds, return_dict=True)
+    mlflow.log_metrics(result)
+
+
+
+
+
+def get_callbacks(to_monitor, mode):
+    checkpoint_prefix = os.path.join(CHECK_POINT_DIR, "ckpt_{epoch}.keras")
+
+    callbacks = [
+        tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
+        tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,
+                                            save_best_only=True, # Save only the best model based on val_loss
+                                            monitor=to_monitor,
+                                            mode=mode,
+                                            verbose=1),  # Display checkpoint saving messages
+        tf.keras.callbacks.ReduceLROnPlateau(monitor=to_monitor,
+                                            mode=mode, factor=0.1, patience=5, min_lr=1e-7),
+        tf.keras.callbacks.EarlyStopping(monitor=to_monitor,
+                                            mode=mode, patience=10, restore_best_weights=True),
+    ]
     
-    test_ds = preprocessor.get_test_dataset(BATCH_SIZE)
-    y_scores = model.predict(test_ds)
-
-    test_df = pd.read_csv(cfg.DATASET_DIRS.TEST_CSV)
-    y_true = test_df[labels].values
-    y_scores = np.where(y_scores>0.5, 1, 0)
-    auc_roc_values = []
-    fig, axs = plt.subplots(1)
-    for i in range(len(labels)):
-        try:
-            roc_score_per_label = metrics.roc_auc_score(y_true=y_true[:,i], y_score=y_scores[:,i])
-            auc_roc_values.append(roc_score_per_label)
-            fpr, tpr, _ = metrics.roc_curve(y_true=y_true[:,i],  y_score=y_scores[:,i])
-            
-            axs.plot([0,1], [0,1], 'k--')
-            axs.plot(fpr, tpr, 
-                    label=f'{labels[i]} - AUC = {round(roc_score_per_label, 3)}')
-
-            axs.set_xlabel('False Positive Rate')
-            axs.set_ylabel('True Positive Rate')
-            axs.legend(loc='lower right')
-        except:
-            log.error(
-                f"Error in generating ROC curve for {labels[i]}. "
-                f"Dataset lacks enough examples."
-            )
-    plt.savefig(f"{cfg.OUTPUTS.OUPUT_DIR}/ROC-Curve.png")
-    mlflow.log_figure(fig, 'ROC-Curve.png')
-    results = model.evaluate(test_ds, verbose=0,return_dict=True)
-    mlflow.log_metrics(results)
+    return callbacks
 
 if __name__ == '__main__':
     main()
+
+
+
 
 
