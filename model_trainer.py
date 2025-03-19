@@ -11,17 +11,14 @@
     #        'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
 """
 import logging
-
-# ## Imports
 import os
 from pathlib import Path
+from turtle import st
 
 import mlflow
 import numpy as np
 import opendatasets as od
-import seaborn as sns
 from hydra import compose, initialize
-from matplotlib import pyplot as plt
 from mlflow.models.signature import ModelSignature
 from mlflow.types.schema import Schema, TensorSpec
 from sklearn.metrics import classification_report, confusion_matrix
@@ -66,7 +63,7 @@ LOG_DIR = 'logs'
 def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
     
-    mlflow.set_experiment('DenseNet121')
+    mlflow.set_experiment('DenseNet201') # loss: 0.5942 - binary_accuracy: 0.3329 - precision: 0.1266 - recall: 0.8875 - AUC: 0.6306
 
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
@@ -85,7 +82,7 @@ def main() -> None:
     CLASSES_NAME = ['Atelectasis','Effusion','Infiltration', 'Mass']#,'Nodule']
 
     preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
-    train_ds, valid_ds, pos_weights, neg_weights = preprocessor.get_training_and_validation_datasets()
+    train_ds, valid_ds, pos_weights, neg_weights, steps_per_epoch= preprocessor.get_training_and_validation_datasets()
 
     to_monitor = 'val_AUC'
     mode = 'max'
@@ -96,8 +93,9 @@ def main() -> None:
                             keras_model_kwargs={"save_format": "keras"},
                             checkpoint_monitor=to_monitor, 
                             checkpoint_mode=mode)
-
-    model = build_DenseNet121(input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1), num_classes=len(CLASSES_NAME))
+    
+    input_shape = (IMAGE_SIZE, IMAGE_SIZE, 1)
+    model = build_DenseNet121(input_shape=input_shape, num_classes=len(CLASSES_NAME))
     log.debug(f"Model summary: {model.summary()}")
 
     METRICS = [
@@ -109,11 +107,12 @@ def main() -> None:
 
     model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate=LEARNING_RATE), 
                 loss=get_weighted_loss(pos_weights, neg_weights),
-            metrics=METRICS)     
+                metrics=METRICS)     
 
     callbacks = get_callbacks(to_monitor, mode)
 
     model.fit(train_ds, 
+            steps_per_epoch=steps_per_epoch,
             validation_data=valid_ds,
             batch_size=BATCH_SIZE,
             epochs = NUM_EPOCHS,
@@ -125,7 +124,7 @@ def main() -> None:
     # -----------------
     # Your input is a batch of images with shape (32, 240, 240, 3)
     # We use -1 to indicate that the batch size can vary.
-    input_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, IMAGE_SIZE, IMAGE_SIZE, 1), "image")])
+    input_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, *input_shape), "image")])
 
     # 2. Output Schema - Multilabel binary classification head
     # ------------------

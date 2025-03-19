@@ -48,12 +48,13 @@ class ChestXRayPreprocessor:
         ])
 
     @tf.function
-    def load_image(self, image_name, label, is_training=True)-> tuple[tf.Tensor, tf.Tensor]:
+    def load_image(self, image_name, label)-> tuple[tf.Tensor, tf.Tensor]:
         """Loads and preprocesses an image."""
-        img_dir = self.config.DATASET_DIRS.TRAIN_IMAGES_DIR #if is_training else self.config.DATASET_DIRS.TEST_IMAGE_DIR
+        img_dir = self.config.DATASET_DIRS.TRAIN_IMAGES_DIR 
         full_path = tf.strings.join([img_dir, '/', image_name])
         image = tf.io.read_file(full_path)
-        image = tf.io.decode_png(image, channels=1)
+        image = tf.io.decode_jpeg(image, channels=1)
+
         image = tf.keras.preprocessing.image.smart_resize(image, 
                                 [self.image_size, self.image_size])
 
@@ -73,13 +74,24 @@ class ChestXRayPreprocessor:
         image = self.normalization_layer(image)
         return image, label
 
-    def prepare_dataset(self, dataset, batch_size, is_training=True)-> tf.data.Dataset:
+
+    def prepare_dataset(self, dataset, batch_size, is_training=False)-> tf.data.Dataset:
+        """Prepares a dataset for training or evaluation."""
+        dataset = dataset.map(self.normalize_image, num_parallel_calls=tf.data.AUTOTUNE)
         if is_training:
             self.log.info("Preparing training dataset with augmentation")
-            dataset = dataset.map(self.augment_image, num_parallel_calls=tf.data.AUTOTUNE)
+            # dataset = dataset.cache()
+            dataset = dataset.shuffle(buffer_size=self.dataset_len) # shuffle before repeat
+            
+            # creates circle by joing start and end of dataset and roll it using batch size
+            dataset = dataset.repeat() # repeat before batch
+            dataset = dataset.batch(batch_size) # batch before cache
+            dataset = dataset.map(self.augment_image, num_parallel_calls=tf.data.AUTOTUNE) # augmentation before batch
+        else:
+            # dataset = dataset.cache()
+            dataset = dataset.batch(batch_size)
 
-        dataset = dataset.map(self.normalize_image, num_parallel_calls=tf.data.AUTOTUNE)
-        return dataset.cache().batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
+        return  dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     def get_class_weights(self, labels_df)-> tuple[tf.Tensor, tf.Tensor]:
         """Calculates class weights."""
@@ -98,25 +110,18 @@ class ChestXRayPreprocessor:
         train_categorical_labels_df = train_categorical_labels_df[self.LABELS]
         self.pos_weights, self.neg_weights = self.get_class_weights(train_categorical_labels_df)
         return train_images_df, train_categorical_labels_df
-        # new_train_df = train_df[self.LABELS]
-        # # train_categorical_labels_df = new_train_df[self.TRAIN_CSV_LABELS[1]].str.get_dummies(sep='|').astype('float32')
-        # train_images_df = train_df['Image'] 
-        # train_categorical_labels_df = new_train_df[self.LABELS]
-        # return train_images_df, train_categorical_labels_df
 
-
-    def _normlization_layer_adapt(self, train_ds:tf.data.Dataset) -> None:
+    def _normalization_layer_adapt(self, train_ds:tf.data.Dataset) -> None:
         """Adapts the normalization layer to the training data."""
-        # images_for_stats =  tf.concat([images for images, _ in train_ds.take(int(dataset_len *0.30))], axis=0) 
-        # images_for_stats =  tf.concat([images for images, _ in train_ds.as_numpy_iterator()], axis=0) 
-        images_for_stats = train_ds.map(lambda x, y: x)\
-                                   .unbatch()\
-                                   .batch(self.batch_size * 10)\
-                                   .take(self.batch_size * 10)
+        normalizing_size = int(self.dataset_len*0.30)
+        images_for_stats = train_ds.map(lambda x, _: x, 
+                                    num_parallel_calls=tf.data.AUTOTUNE)\
+                                .unbatch()\
+                                .batch(normalizing_size)\
+                                .take(1)  # Take just one batch
         self.normalization_layer.adapt(images_for_stats)
-        # self.normalization_layer.adapt(train_ds.map(lambda x, y: x))    
+        self.log.info("Normalization layer adapted")
 
-    
     def load_and_preprocess_dataframe(self, csv_path: str, is_training: bool, split_ratio: float = 0.2) -> tuple[tf.data.Dataset, tf.data.Dataset] | tf.data.Dataset:
         """Loads a dataframe from CSV, preprocesses it, and returns a tf.data.Dataset.
         Args:
@@ -135,37 +140,32 @@ class ChestXRayPreprocessor:
 
         self.log.info(f"Loaded dataframe with shape: {df.shape} and {len(df)} rows")
 
-        if is_training:
-            # Split the data into training and validation sets
-            rest_images, self.test_images, rest_labels, self.test_labels = train_test_split(images_df.values, 
-                                                                                  labels_df.values, 
-                                                                                  test_size=0.1, 
-                                                                                  random_state=42, 
-                                                                                  stratify=labels_df.values)
-        
-            train_images, val_images, train_labels, val_labels = train_test_split(rest_images, 
-                                                                                  rest_labels, 
-                                                                                  test_size=split_ratio, 
-                                                                                  random_state=42, 
-                                                                                  stratify=rest_labels)
-
-            self.log.info(f"training split: {len(train_images)} and validation split: {len(val_images)}")
-
-            train_dataset = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
-            val_dataset = tf.data.Dataset.from_tensor_slices((val_images, val_labels))
-
-            train_dataset = train_dataset.map(lambda x, y: self.load_image(x, y, is_training), num_parallel_calls=tf.data.AUTOTUNE)
-            val_dataset = val_dataset.map(lambda x, y: self.load_image(x, y), num_parallel_calls=tf.data.AUTOTUNE)
-
-            train_dataset = train_dataset.shuffle(buffer_size=len(train_images))
-            return train_dataset, val_dataset
-        else:
-            dataset = tf.data.Dataset.from_tensor_slices((images_df.values, labels_df.values))
-            dataset = dataset.map(lambda x, y: self.load_image(x, y), num_parallel_calls=tf.data.AUTOTUNE)
-            return dataset
+        # Split the data into training and validation sets
+        rest_images, self.test_images, rest_labels, self.test_labels = train_test_split(images_df.values, 
+                                                                                labels_df.values, 
+                                                                                test_size=0.1, 
+                                                                                random_state=42, 
+                                                                                stratify=labels_df.values)
     
+        train_images, val_images, train_labels, val_labels = train_test_split(rest_images, 
+                                                                                rest_labels, 
+                                                                                test_size=split_ratio, 
+                                                                                random_state=42, 
+                                                                                stratify=rest_labels)
+        self.dataset_len = len(train_images)
+        self.log.info(f"training split: {len(train_images)} and validation split: {len(val_images)}")
+
+        train_dataset = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
+        val_dataset = tf.data.Dataset.from_tensor_slices((val_images, val_labels))
+
+        train_dataset = train_dataset.map(lambda x, y: self.load_image(x, y), num_parallel_calls=tf.data.AUTOTUNE)
+        val_dataset = val_dataset.map(lambda x, y: self.load_image(x, y), num_parallel_calls=tf.data.AUTOTUNE)
+
+        return train_dataset, val_dataset
+
+
     def get_training_and_validation_datasets(self, batch_size: int | None = None) -> tuple[
-        tf.data.Dataset, tf.data.Dataset, tf.Tensor| None, tf.Tensor | None]:
+        tf.data.Dataset, tf.data.Dataset, tf.Tensor| None, tf.Tensor | None, int]:
         """Loads, preprocesses, and prepares training and validation datasets.
 
         Returns:
@@ -173,17 +173,16 @@ class ChestXRayPreprocessor:
         """
         self.log.info(f"Getting training and validation datasets with batch size:{batch_size}")
         train_ds, valid_ds = self.load_and_preprocess_dataframe(self.config.DATASET_DIRS.TRAIN_CSV, is_training=True)
-        # valid_ds = self.load_and_preprocess_dataframe(self.config.DATASET_DIRS.VALID_CSV, is_training=False)
 
-        self._normlization_layer_adapt(train_ds=train_ds)
+        self._normalization_layer_adapt(train_ds=train_ds)
 
         if not batch_size:
             batch_size = self.config.TRAIN.BATCH_SIZE
 
         train_ds = self.prepare_dataset(train_ds, batch_size, is_training=True)
         valid_ds = self.prepare_dataset(valid_ds, batch_size, is_training=False)
-
-        return train_ds, valid_ds, self.pos_weights, self.neg_weights 
+        steps_per_epoch = self.dataset_len // batch_size
+        return train_ds, valid_ds, self.pos_weights, self.neg_weights, steps_per_epoch
 
 
     def get_test_dataset(self, batch_size: int | None = None) -> tf.data.Dataset:
@@ -195,9 +194,49 @@ class ChestXRayPreprocessor:
         # labels_df = df[self.LABELS]
 
         dataset = tf.data.Dataset.from_tensor_slices((self.test_images, self.test_labels))
-        test_ds = dataset.map(lambda x, y: self.load_image(x, y, is_training=False), num_parallel_calls=tf.data.AUTOTUNE)
+        test_ds = dataset.map(lambda x, y: self.load_image(x, y), num_parallel_calls=tf.data.AUTOTUNE)
         if not batch_size:
             batch_size = self.config.TRAIN.BATCH_SIZE
 
         test_ds = self.prepare_dataset(test_ds, batch_size, is_training=False)
         return test_ds
+    
+
+
+
+    # def prepare_dataset(self, dataset, batch_size, is_training=False)-> tf.data.Dataset:
+    #     """Create dataset (from files, etc.)
+    #         Shuffle (for training)
+    #         Pre-processing (normalization, etc.)
+    #         Cache (if data fits in memory)
+    #         Repeat (for training)
+    #         Augmentation (for training)
+    #         Batch
+    #         Prefetch
+    #     """
+    #     if is_training:
+    #         self.log.info("Preparing training dataset with augmentation")
+    #         # Shuffling before repeating ensures that each epoch sees a different order of the data. 
+    #         # If you repeat first, you'll get the same order multiple times before it shuffles.
+    #         dataset = dataset.shuffle(buffer_size=self.dataset_len) # shuffle before repeat
+            
+    #         # makes the dataset loop indefinitely. If you batch before repeating, 
+    #         # you'll only repeat the batches, not the individual samples.
+    #         dataset = dataset.repeat() # repeat before batch
+    #         # Data augmentation should be applied to individual images, not to batches. 
+    #         # Applying augmentation after batching would mean that 
+    #         # the same augmentation is applied to all images in a batch, which is not the desired behavior.
+    #         dataset = dataset.map(self.augment_image, num_parallel_calls=tf.data.AUTOTUNE) # augmentation before batch
+    #         dataset = dataset.map(self.normalize_image, num_parallel_calls=tf.data.AUTOTUNE)
+    #         dataset = dataset.batch(batch_size) # batch before cache
+    #         # Caching after batching is more efficient. You're caching the batches, which are the units of data 
+    #         # that will be used during training. Caching individual images and then batching would be less efficient.
+    #         # dataset = dataset.cache() # cache after batch
+    #         # prefetch should always be the last operation in your pipeline. It overlaps data preprocessing with model execution, 
+    #         # so it needs to happen after all other transformations.
+    #     else:
+    #         dataset = dataset.map(self.normalize_image, num_parallel_calls=tf.data.AUTOTUNE)
+    #         dataset = dataset.batch(batch_size)
+    #         # dataset = dataset.cache()
+
+    #     return  dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
