@@ -33,22 +33,24 @@ class ChestXRayPreprocessor:
         self.image_size:int = config.TRAIN.IMG_SIZE
         self.pos_weights = None
         self.neg_weights = None
+        self.test_images = None
+        self.test_labels = None
         self.LABELS = labels or ['Atelectasis','Effusion','Infiltration', 'Mass','Nodule']
 
         self.TRAIN_CSV_LABELS = ['Image Index', 'Finding Labels']
 
         self.normalization_layer = tf.keras.layers.Normalization()
         self.data_augmentation = tf.keras.Sequential([
-            tf.keras.layers.RandomRotation(0.10),
-            tf.keras.layers.RandomTranslation(0.05, 0.05),
-            tf.keras.layers.RandomZoom(0.1, 0.1),
-            tf.keras.layers.GaussianNoise(0.01)  # Simulates quantum noise
+            tf.keras.layers.RandomRotation(0.10, fill_mode='constant', seed=49),
+            tf.keras.layers.RandomTranslation(0.05, 0.05, fill_mode='constant', seed=49),
+            tf.keras.layers.RandomZoom(0.1, 0.1, fill_mode='constant', seed=49),
+            tf.keras.layers.GaussianNoise(0.02, seed=49)  # Simulates quantum noise
         ])
 
     @tf.function
     def load_image(self, image_name, label, is_training=True)-> tuple[tf.Tensor, tf.Tensor]:
         """Loads and preprocesses an image."""
-        img_dir = self.config.DATASET_DIRS.TRAIN_IMAGES_DIR if is_training else self.config.DATASET_DIRS.TEST_IMAGE_DIR
+        img_dir = self.config.DATASET_DIRS.TRAIN_IMAGES_DIR #if is_training else self.config.DATASET_DIRS.TEST_IMAGE_DIR
         full_path = tf.strings.join([img_dir, '/', image_name])
         image = tf.io.read_file(full_path)
         image = tf.io.decode_png(image, channels=1)
@@ -135,11 +137,17 @@ class ChestXRayPreprocessor:
 
         if is_training:
             # Split the data into training and validation sets
-            train_images, val_images, train_labels, val_labels = train_test_split(images_df.values, 
+            rest_images, self.test_images, rest_labels, self.test_labels = train_test_split(images_df.values, 
                                                                                   labels_df.values, 
-                                                                                  test_size=split_ratio, 
+                                                                                  test_size=0.1, 
                                                                                   random_state=42, 
                                                                                   stratify=labels_df.values)
+        
+            train_images, val_images, train_labels, val_labels = train_test_split(rest_images, 
+                                                                                  rest_labels, 
+                                                                                  test_size=split_ratio, 
+                                                                                  random_state=42, 
+                                                                                  stratify=rest_labels)
 
             self.log.info(f"training split: {len(train_images)} and validation split: {len(val_images)}")
 
@@ -181,12 +189,12 @@ class ChestXRayPreprocessor:
     def get_test_dataset(self, batch_size: int | None = None) -> tf.data.Dataset:
         """Loads, preprocesses, and prepares the test dataset."""
         self.log.info("Getting test dataset")
-        df = pd.read_csv(self.config.DATASET_DIRS.TEST_CSV)
+        # df = pd.read_csv(self.config.DATASET_DIRS.TEST_CSV)
 
-        image = df.Image
-        labels_df = df[self.LABELS]
+        # image = df.Image
+        # labels_df = df[self.LABELS]
 
-        dataset = tf.data.Dataset.from_tensor_slices((image.values, labels_df.values))
+        dataset = tf.data.Dataset.from_tensor_slices((self.test_images, self.test_labels))
         test_ds = dataset.map(lambda x, y: self.load_image(x, y, is_training=False), num_parallel_calls=tf.data.AUTOTUNE)
         if not batch_size:
             batch_size = self.config.TRAIN.BATCH_SIZE

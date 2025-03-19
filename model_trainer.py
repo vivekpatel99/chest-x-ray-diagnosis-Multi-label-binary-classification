@@ -10,23 +10,30 @@
     #        'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass',
     #        'Nodule', 'Pleural_Thickening', 'Pneumonia', 'Pneumothorax']
 """
+import logging
+
 # ## Imports
 import os
-import logging
 from pathlib import Path
 
 import mlflow
 import numpy as np
 import opendatasets as od
+import seaborn as sns
 from hydra import compose, initialize
+from matplotlib import pyplot as plt
 from mlflow.models.signature import ModelSignature
 from mlflow.types.schema import Schema, TensorSpec
+from sklearn.metrics import classification_report, confusion_matrix
+from tensorflow.keras import mixed_precision
 
 from src.data_loader.chest_x_ray_preprocessor import ChestXRayPreprocessor
 from src.model.model import build_DenseNet121
 from src.utils.logs import get_logger
+from src.utils.utils import plot_auc_curve
 from src.weighted_loss.weighted_loss import get_weighted_loss
 
+mixed_precision.set_global_policy('mixed_float16')
 # Set environment variables
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -50,11 +57,17 @@ IMAGE_SIZE = cfg.TRAIN.IMG_SIZE
 BATCH_SIZE = cfg.TRAIN.BATCH_SIZE
 NUM_EPOCHS = cfg.TRAIN.NUM_EPOCHS
 LEARNING_RATE = cfg.TRAIN.LEARNING_RATE
-CHECK_POINT_DIR = 'exported_models'
+OUPUT_DIR = Path(cfg.OUTPUTS.OUPUT_DIR)
+OUPUT_DIR.mkdir(parents=True, exist_ok=True)
+CHECK_POINT_DIR = Path(cfg.OUTPUTS.CHECKPOINT_PATH)
+CHECK_POINT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR = 'logs'
 
 def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
+    
+    mlflow.set_experiment('DenseNet121')
+
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
         log.info("No GPU found")
@@ -85,7 +98,7 @@ def main() -> None:
                             checkpoint_mode=mode)
 
     model = build_DenseNet121(input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1), num_classes=len(CLASSES_NAME))
-    log.info(f"Model summary: {model.summary()}")
+    log.debug(f"Model summary: {model.summary()}")
 
     METRICS = [
         'binary_accuracy',
@@ -106,13 +119,8 @@ def main() -> None:
             epochs = NUM_EPOCHS,
             callbacks=callbacks)
 
-    preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
     test_ds = preprocessor.get_test_dataset()
-    result = model.evaluate(test_ds, return_dict=True)
-    mlflow.log_metrics(result)
-    log.info(f"Test results: {result}")
-
-
+ 
     # 1. Input Schema
     # -----------------
     # Your input is a batch of images with shape (32, 240, 240, 3)
@@ -135,10 +143,57 @@ def main() -> None:
         signature=signature,
         code_paths=["src"],
     )
+    y_true = np.array([y.astype(int) for _, y in test_ds.unbatch().as_numpy_iterator()])
+
+    evaluate_model(model=model, 
+                    test_ds=test_ds, 
+                    y_true_labels=y_true, 
+                    output_dir=OUPUT_DIR,
+                    class_name=CLASSES_NAME) 
+
+
+def evaluate_model(*,model:tf.keras.Model, 
+                   test_ds:tf.data.Dataset, 
+                   y_true_labels:np.ndarray, 
+                   output_dir:Path,
+                   class_name:list[str]) -> None:
+    """Evaluates the model.
+
+    Args:
+        model: The model to evaluate.
+        test_ds: The test dataset.
+        y_true_labels: The true labels.
+        y_true_bboxes: The true bounding boxes.
+        cfg: The configuration object.
+        class_name: The list of class names.
+    """
+    log = get_logger(__name__)
+    log.info("Evaluating model...")
+
+    results = model.evaluate(test_ds, return_dict=True)
+    mlflow.log_dict(results, 'test_metrics.json')
+
+    y_prob_pred = model.predict(test_ds)
+    y_pred = (y_prob_pred>0.5).astype(int)
+
+    report = classification_report(y_true_labels,
+                                    y_pred, 
+                                    target_names=class_name,
+                                    output_dict=True)
+    mlflow.log_dict(report, 'classification_report.json') 
+
+    auc_fig = plot_auc_curve(output_dir=output_dir, 
+                                    class_name_list=class_name, 
+                                    y_true=y_true_labels, 
+                                    y_prob_pred=y_pred)
+
+    mlflow.log_figure(auc_fig, 'ROC-Curve.png')
+
+
     
-
-
-def get_callbacks(to_monitor, mode):
+    # log.info("Model evaluated.")
+def get_callbacks(to_monitor, mode) -> list[tf.keras.callbacks.Callback]:
+    
     checkpoint_prefix = os.path.join(CHECK_POINT_DIR, "ckpt_{epoch}.keras")
 
     callbacks = [
@@ -151,7 +206,7 @@ def get_callbacks(to_monitor, mode):
         tf.keras.callbacks.ReduceLROnPlateau(monitor=to_monitor,
                                             mode=mode, factor=0.1, patience=5, min_lr=1e-7),
         tf.keras.callbacks.EarlyStopping(monitor=to_monitor,
-                                            mode=mode, patience=10, restore_best_weights=True),
+                                            mode=mode, patience=15, restore_best_weights=True),
     ]
     
     return callbacks
