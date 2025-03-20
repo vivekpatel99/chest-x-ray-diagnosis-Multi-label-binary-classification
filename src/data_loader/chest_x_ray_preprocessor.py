@@ -35,7 +35,7 @@ class ChestXRayPreprocessor:
         self.neg_weights = None
         self.test_images = None
         self.test_labels = None
-        self.LABELS = labels 
+        self.labels = labels 
 
         self.TRAIN_CSV_LABELS = ['Image Index', 'Finding Labels']
 
@@ -108,7 +108,7 @@ class ChestXRayPreprocessor:
         self.log.info("Cleaning up training dataframe")
         filterd_labels_df = df[self.TRAIN_CSV_LABELS[1]].str.get_dummies(sep='|').astype('float32')
         # train_images_df = train_df['Image Index'] 
-        filterd_labels_df = filterd_labels_df[self.LABELS]
+        filterd_labels_df = filterd_labels_df[self.labels]
 
         # Drop rows where ALL labels are zero:
         all_labels = filterd_labels_df.columns

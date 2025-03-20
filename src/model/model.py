@@ -14,7 +14,7 @@ from tensorflow.keras.regularizers import l2
 def build_DenseNet121(input_shape:tuple, num_classes:int):
     base_model = DenseNet121(
             include_top=False,
-            weights=None, # input will be grayscale images
+            weights='imagenet', # input will be grayscale images
             input_shape=input_shape  
         )
     base_model.trainable = True

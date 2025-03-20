@@ -64,7 +64,7 @@ LOG_DIR = 'logs'
 def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
     
-    mlflow.set_experiment('DenseNet121') # loss: 0.5942 - binary_accuracy: 0.3329 - precision: 0.1266 - recall: 0.8875 - AUC: 0.6306
+    mlflow.set_experiment('DenseNet121-all-classes') # loss: 0.5942 - binary_accuracy: 0.3329 - precision: 0.1266 - recall: 0.8875 - AUC: 0.6306
 
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
