@@ -12,16 +12,21 @@ from tensorflow.keras.regularizers import l2
 
 
 def build_DenseNet121(input_shape:tuple, num_classes:int):
-    base_model = DenseNet201(
+    base_model = DenseNet121(
             include_top=False,
             weights=None, # input will be grayscale images
             input_shape=input_shape  
         )
-    # base_model.trainable = False
+    base_model.trainable = True
+
+    # Then freeze all layers except the last 20
+    for layer in base_model.layers[:-40]:
+        layer.trainable = False
+        
     x = base_model.output
-    # x = BatchNormalization()(x) 
     x = GlobalAveragePooling2D()(x)
-    x = Dense(512, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(512, activation='relu',kernel_regularizer=l2(0.001))(x)
     x = Dropout(0.5)(x)
     x = Dense(units=int(num_classes), name='final_dense',
               kernel_regularizer=l2(0.001))(x)

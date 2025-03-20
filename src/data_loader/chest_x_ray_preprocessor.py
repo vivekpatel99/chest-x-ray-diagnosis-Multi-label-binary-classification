@@ -35,7 +35,7 @@ class ChestXRayPreprocessor:
         self.neg_weights = None
         self.test_images = None
         self.test_labels = None
-        self.LABELS = labels or ['Atelectasis','Effusion','Infiltration', 'Mass','Nodule']
+        self.LABELS = labels 
 
         self.TRAIN_CSV_LABELS = ['Image Index', 'Finding Labels']
 
@@ -53,7 +53,7 @@ class ChestXRayPreprocessor:
         img_dir = self.config.DATASET_DIRS.TRAIN_IMAGES_DIR 
         full_path = tf.strings.join([img_dir, '/', image_name])
         image = tf.io.read_file(full_path)
-        image = tf.io.decode_jpeg(image, channels=1)
+        image = tf.io.decode_jpeg(image, channels=3)
 
         image = tf.keras.preprocessing.image.smart_resize(image, 
                                 [self.image_size, self.image_size])
@@ -71,7 +71,8 @@ class ChestXRayPreprocessor:
     @tf.function
     def normalize_image(self, image, label)-> tuple[tf.Tensor, tf.Tensor]:
         self.log.info("Normalizing image")
-        image = self.normalization_layer(image)
+        # image = self.normalization_layer(image)
+        image = tf.keras.applications.densenet.preprocess_input(image)
         return image, label
 
 
@@ -102,14 +103,24 @@ class ChestXRayPreprocessor:
         neg_weights = positive_frequencies.values
         return pos_weights, neg_weights
 
-    def train_df_clean_up(self, train_df)-> tuple[pd.DataFrame, pd.DataFrame]:
+    def train_df_clean_up(self, df)-> tuple[pd.DataFrame, pd.DataFrame]:
         """Cleans up the training dataframe."""
         self.log.info("Cleaning up training dataframe")
-        train_categorical_labels_df = train_df[self.TRAIN_CSV_LABELS[1]].str.get_dummies(sep='|').astype('float32')
-        train_images_df = train_df['Image Index'] 
-        train_categorical_labels_df = train_categorical_labels_df[self.LABELS]
-        self.pos_weights, self.neg_weights = self.get_class_weights(train_categorical_labels_df)
-        return train_images_df, train_categorical_labels_df
+        filterd_labels_df = df[self.TRAIN_CSV_LABELS[1]].str.get_dummies(sep='|').astype('float32')
+        # train_images_df = train_df['Image Index'] 
+        filterd_labels_df = filterd_labels_df[self.LABELS]
+
+        # Drop rows where ALL labels are zero:
+        all_labels = filterd_labels_df.columns
+        all_labels_zero = (filterd_labels_df[all_labels] == 0).all(axis=1)
+        filterd_labels_df = filterd_labels_df[~all_labels_zero] # ~ is the negation operator
+
+        images_df = df['Image Index'] 
+        filtered_images_df = images_df[~all_labels_zero]
+        
+        self.pos_weights, self.neg_weights = self.get_class_weights(filterd_labels_df)
+
+        return filtered_images_df, filterd_labels_df
 
     def _normalization_layer_adapt(self, train_ds:tf.data.Dataset) -> None:
         """Adapts the normalization layer to the training data."""
@@ -139,19 +150,24 @@ class ChestXRayPreprocessor:
         images_df, labels_df = self.train_df_clean_up(df)
 
         self.log.info(f"Loaded dataframe with shape: {df.shape} and {len(df)} rows")
-
-        # Split the data into training and validation sets
-        rest_images, self.test_images, rest_labels, self.test_labels = train_test_split(images_df.values, 
+        train_images, val_images, train_labels, val_labels  = train_test_split(images_df.values, 
                                                                                 labels_df.values, 
-                                                                                test_size=0.1, 
+                                                                                 test_size=split_ratio,
                                                                                 random_state=42, 
                                                                                 stratify=labels_df.values)
     
-        train_images, val_images, train_labels, val_labels = train_test_split(rest_images, 
-                                                                                rest_labels, 
-                                                                                test_size=split_ratio, 
-                                                                                random_state=42, 
-                                                                                stratify=rest_labels)
+        # Split the data into training and validation sets
+        # rest_images, self.test_images, rest_labels, self.test_labels = train_test_split(images_df.values, 
+        #                                                                         labels_df.values, 
+        #                                                                         test_size=0.1, 
+        #                                                                         random_state=42, 
+        #                                                                         stratify=labels_df.values)
+    
+        # train_images, val_images, train_labels, val_labels = train_test_split(rest_images, 
+        #                                                                         rest_labels, 
+        #                                                                         test_size=split_ratio, 
+        #                                                                         random_state=42, 
+        #                                                                         stratify=rest_labels)
         self.dataset_len = len(train_images)
         self.log.info(f"training split: {len(train_images)} and validation split: {len(val_images)}")
 

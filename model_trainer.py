@@ -16,6 +16,7 @@ from pathlib import Path
 from turtle import st
 
 import mlflow
+import mlflow.experiments
 import numpy as np
 import opendatasets as od
 from hydra import compose, initialize
@@ -63,7 +64,7 @@ LOG_DIR = 'logs'
 def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
     
-    mlflow.set_experiment('DenseNet201') # loss: 0.5942 - binary_accuracy: 0.3329 - precision: 0.1266 - recall: 0.8875 - AUC: 0.6306
+    mlflow.set_experiment('DenseNet121') # loss: 0.5942 - binary_accuracy: 0.3329 - precision: 0.1266 - recall: 0.8875 - AUC: 0.6306
 
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
@@ -79,7 +80,7 @@ def main() -> None:
         dataset_url = 'https://www.kaggle.com/datasets/nih-chest-xrays/sample'
         od.download(dataset_url)
 
-    CLASSES_NAME = ['Atelectasis','Effusion','Infiltration', 'Mass']#,'Nodule']
+    CLASSES_NAME = ['Atelectasis','Effusion','Infiltration', 'Mass', 'No Finding']#,'Nodule']
 
     preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
     train_ds, valid_ds, pos_weights, neg_weights, steps_per_epoch= preprocessor.get_training_and_validation_datasets()
@@ -94,7 +95,7 @@ def main() -> None:
                             checkpoint_monitor=to_monitor, 
                             checkpoint_mode=mode)
     
-    input_shape = (IMAGE_SIZE, IMAGE_SIZE, 1)
+    input_shape = (IMAGE_SIZE, IMAGE_SIZE, 3)
     model = build_DenseNet121(input_shape=input_shape, num_classes=len(CLASSES_NAME))
     log.debug(f"Model summary: {model.summary()}")
 
@@ -118,7 +119,7 @@ def main() -> None:
             epochs = NUM_EPOCHS,
             callbacks=callbacks)
 
-    test_ds = preprocessor.get_test_dataset()
+    # test_ds = preprocessor.get_test_dataset()
  
     # 1. Input Schema
     # -----------------
@@ -142,16 +143,17 @@ def main() -> None:
         signature=signature,
         code_paths=["src"],
     )
-    y_true = np.array([y.astype(int) for _, y in test_ds.unbatch().as_numpy_iterator()])
+    y_true = np.array([y.astype(int) for _, y in valid_ds.unbatch().as_numpy_iterator()])
 
-    evaluate_model(model=model, 
-                    test_ds=test_ds, 
+    evaluate_model(log=log,
+                   model=model, 
+                    test_ds=valid_ds, 
                     y_true_labels=y_true, 
                     output_dir=OUPUT_DIR,
-                    class_name=CLASSES_NAME) 
+                    class_name=CLASSES_NAME)
 
-
-def evaluate_model(*,model:tf.keras.Model, 
+def evaluate_model(*,log,
+                   model:tf.keras.Model, 
                    test_ds:tf.data.Dataset, 
                    y_true_labels:np.ndarray, 
                    output_dir:Path,
@@ -166,7 +168,6 @@ def evaluate_model(*,model:tf.keras.Model,
         cfg: The configuration object.
         class_name: The list of class names.
     """
-    log = get_logger(__name__)
     log.info("Evaluating model...")
 
     results = model.evaluate(test_ds, return_dict=True)
@@ -193,7 +194,7 @@ def evaluate_model(*,model:tf.keras.Model,
     # log.info("Model evaluated.")
 def get_callbacks(to_monitor, mode) -> list[tf.keras.callbacks.Callback]:
     
-    checkpoint_prefix = os.path.join(CHECK_POINT_DIR, "ckpt_{epoch}.keras")
+    checkpoint_prefix = str(CHECK_POINT_DIR / "best_densenet121.keras")
 
     callbacks = [
         tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
