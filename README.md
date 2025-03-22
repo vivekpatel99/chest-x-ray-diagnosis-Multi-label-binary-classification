@@ -1,4 +1,4 @@
-# chest-x-ray-diagnosis
+# chest-x-ray-diagnosis using [DenseNet](https://arxiv.org/abs/1608.06993)
 
 ## Project Overview
 [ChestX-ray8 dataset](https://arxiv.org/abs/1705.02315) which contains 108,948 frontal-view X-ray images of 32,717 unique patients. 
@@ -80,12 +80,18 @@ def get_weighted_loss(pos_weights, neg_weights, epsilon=1e-7):
 
 ## 📊 Performance Highlights
 
-| Pathology | AUC | Sensitivity | Specificity |
-|-----------|-----|-------------|-------------|
-| Atelectasis | 0.81 | 0.78 | 0.83 |
-| Cardiomegaly | 0.89 | 0.85 | 0.92 |
-| Effusion | 0.87 | 0.83 | 0.89 |
-| ... | ... | ... | ... |
+              precision    recall  f1-score   support
+
+ Atelectasis       0.31      0.46      0.37       102
+    Effusion       0.39      0.62      0.48       129
+Infiltration       0.38      0.41      0.40       193
+        Mass       0.21      0.33      0.26        57
+  No Finding       0.73      0.84      0.78       609
+
+   micro avg       0.54      0.67      0.60      1090
+   macro avg       0.40      0.53      0.46      1090
+weighted avg       0.56      0.67      0.61      1090
+ samples avg       0.60      0.69      0.63      1090
 
 ## 🛠️ Technologies Used
 - tensorflow:25.02-tf2-py3 Docker image from [Nvidia](https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel-25-01.html#) to avoid GPU detection errors by Tensorflow

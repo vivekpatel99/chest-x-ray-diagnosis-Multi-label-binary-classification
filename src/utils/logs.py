@@ -25,8 +25,8 @@ def get_file_handler(log_file: str = "app.log") -> logging.FileHandler:
     Returns:
         logging.FileHandler which logs into a file.
     """
-    os.remove(log_file)
-    file_handler = logging.FileHandler(log_file)
+
+    file_handler = logging.FileHandler(log_file,mode= 'w')
     formatter = logging.Formatter("%(asctime)s — %(name)s — %(levelname)s — %(message)s")
     file_handler.setFormatter(formatter)
     return file_handler

@@ -1,6 +1,7 @@
 import os
 
 import matplotlib.pyplot as plt
+import opendatasets as od
 from sklearn import metrics
 
 
@@ -37,3 +38,10 @@ def plot_auc_curve(output_dir, class_name_list, y_true, y_prob_pred):
     plt.savefig(f"{output_dir}/ROC-Curve.png")
 
     return fig
+
+def download_dataset(log, dataset_path):
+    dataset_path.mkdir(parents=True, exist_ok=True)
+    if not dataset_path.is_dir():
+        log.info("Downloading the dataset")
+        dataset_url = 'https://www.kaggle.com/datasets/nih-chest-xrays/sample'
+        od.download(dataset_url)

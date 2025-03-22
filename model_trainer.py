@@ -12,13 +12,12 @@
 """
 import logging
 import os
+from math import exp
 from pathlib import Path
-from turtle import st
 
 import mlflow
 import mlflow.experiments
 import numpy as np
-import opendatasets as od
 from hydra import compose, initialize
 from mlflow.models.signature import ModelSignature
 from mlflow.types.schema import Schema, TensorSpec
@@ -26,12 +25,13 @@ from sklearn.metrics import classification_report, confusion_matrix
 from tensorflow.keras import mixed_precision
 
 from src.data_loader.chest_x_ray_preprocessor import ChestXRayPreprocessor
-from src.model.model import build_DenseNet121
+from src.model.densenet121_model import build_DenseNet121
+from src.model.ResNet101V2_model import build_ResNet101V2
 from src.utils.logs import get_logger
-from src.utils.utils import plot_auc_curve
+from src.utils.utils import download_dataset, plot_auc_curve
 from src.weighted_loss.weighted_loss import get_weighted_loss
 
-mixed_precision.set_global_policy('mixed_float16')
+# mixed_precision.set_global_policy('mixed_float16')
 # Set environment variables
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -60,11 +60,12 @@ OUPUT_DIR.mkdir(parents=True, exist_ok=True)
 CHECK_POINT_DIR = Path(cfg.OUTPUTS.CHECKPOINT_PATH)
 CHECK_POINT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR = 'logs'
+EXPERIMENT_NAME = 'build_ResNet101V2'
 
 def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
-    
-    mlflow.set_experiment('DenseNet121-all-classes') # loss: 0.5942 - binary_accuracy: 0.3329 - precision: 0.1266 - recall: 0.8875 - AUC: 0.6306
+
+    mlflow.set_experiment(EXPERIMENT_NAME) 
 
     found_gpu = tf.config.list_physical_devices('GPU')
     if not found_gpu:
@@ -74,18 +75,14 @@ def main() -> None:
     # Look into the data directory
     datasets = 'datasets/sample'
     dataset_path = Path(datasets)
-    dataset_path.mkdir(parents=True, exist_ok=True)
-    if not dataset_path.is_dir():
-        log.info("Downloading the dataset")
-        dataset_url = 'https://www.kaggle.com/datasets/nih-chest-xrays/sample'
-        od.download(dataset_url)
+    download_dataset(log, dataset_path)
 
-    CLASSES_NAME = ['Atelectasis','Effusion','Infiltration', 'Mass', 'No Finding']#,'Nodule']
+    CLASSES_NAME = ['Atelectasis','Effusion','Infiltration', 'Mass', 'No Finding']
 
     preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
     train_ds, valid_ds, pos_weights, neg_weights, steps_per_epoch= preprocessor.get_training_and_validation_datasets()
 
-    to_monitor = 'val_AUC'
+    to_monitor = 'val_precision'
     mode = 'max'
     mlflow.tensorflow.autolog(log_models=True, 
                             log_datasets=False, 
@@ -94,63 +91,67 @@ def main() -> None:
                             keras_model_kwargs={"save_format": "keras"},
                             checkpoint_monitor=to_monitor, 
                             checkpoint_mode=mode)
+    # Start an MLflow run
+    with mlflow.start_run() as run:
+        input_shape = (IMAGE_SIZE, IMAGE_SIZE, 3)
+        # model = build_DenseNet121(input_shape=input_shape, num_classes=len(CLASSES_NAME))
+        model = build_ResNet101V2(input_shape=input_shape, num_classes=len(CLASSES_NAME))
+        log.debug(f"Model summary: {model.summary()}")
+
+        METRICS = [
+            'binary_accuracy',
+            tf.keras.metrics.Precision(name='precision'),
+            tf.keras.metrics.Recall(name='recall'),
+            tf.keras.metrics.AUC(name='AUC'), 
+        ]
+
+        model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate=LEARNING_RATE), 
+                    loss=get_weighted_loss(pos_weights, neg_weights),
+                    metrics=METRICS)     
+
+        callbacks = get_callbacks(to_monitor, mode)
+
+        model.fit(train_ds, 
+                steps_per_epoch=steps_per_epoch,
+                validation_data=valid_ds,
+                batch_size=BATCH_SIZE,
+                epochs = NUM_EPOCHS,
+                callbacks=callbacks)
+
+        # test_ds = preprocessor.get_test_dataset()
     
-    input_shape = (IMAGE_SIZE, IMAGE_SIZE, 3)
-    model = build_DenseNet121(input_shape=input_shape, num_classes=len(CLASSES_NAME))
-    log.debug(f"Model summary: {model.summary()}")
+        # 1. Input Schema
+        # -----------------
+        # Your input is a batch of images with shape (32, 240, 240, 3)
+        # We use -1 to indicate that the batch size can vary.
+        input_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, *input_shape), "image")])
 
-    METRICS = [
-        'binary_accuracy',
-        tf.keras.metrics.Precision(name='precision'),
-        tf.keras.metrics.Recall(name='recall'),
-        tf.keras.metrics.AUC(name='AUC'), 
-    ]
+        # 2. Output Schema - Multilabel binary classification head
+        # ------------------
+        # Your model outputs a list of two arrays. We need to define a schema for each.
+        # Array 1: Shape (1, 3)
+        output_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, len(CLASSES_NAME)), "classification")])
 
-    model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate=LEARNING_RATE), 
-                loss=get_weighted_loss(pos_weights, neg_weights),
-                metrics=METRICS)     
+        # 3. Model Signature
+        # --------------------
+        # Combine the input and output schemas into a ModelSignature
+        signature = ModelSignature(inputs=input_schema, outputs=output_schema)
+        mlflow.tensorflow.log_model(
+            model,
+            "my_model",
+            signature=signature,
+            code_paths=["src"],
+        )
+        y_true = np.array([y.astype(int) for _, y in valid_ds.unbatch().as_numpy_iterator()])
 
-    callbacks = get_callbacks(to_monitor, mode)
+        evaluate_model(log=log,
+                    model=model, 
+                        test_ds=valid_ds, 
+                        y_true_labels=y_true, 
+                        output_dir=OUPUT_DIR,
+                        class_name=CLASSES_NAME)
 
-    model.fit(train_ds, 
-            steps_per_epoch=steps_per_epoch,
-            validation_data=valid_ds,
-            batch_size=BATCH_SIZE,
-            epochs = NUM_EPOCHS,
-            callbacks=callbacks)
 
-    # test_ds = preprocessor.get_test_dataset()
- 
-    # 1. Input Schema
-    # -----------------
-    # Your input is a batch of images with shape (32, 240, 240, 3)
-    # We use -1 to indicate that the batch size can vary.
-    input_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, *input_shape), "image")])
-
-    # 2. Output Schema - Multilabel binary classification head
-    # ------------------
-    # Your model outputs a list of two arrays. We need to define a schema for each.
-    # Array 1: Shape (1, 3)
-    output_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, len(CLASSES_NAME)), "classification")])
-
-    # 3. Model Signature
-    # --------------------
-    # Combine the input and output schemas into a ModelSignature
-    signature = ModelSignature(inputs=input_schema, outputs=output_schema)
-    mlflow.tensorflow.log_model(
-        model,
-        "my_model",
-        signature=signature,
-        code_paths=["src"],
-    )
-    y_true = np.array([y.astype(int) for _, y in valid_ds.unbatch().as_numpy_iterator()])
-
-    evaluate_model(log=log,
-                   model=model, 
-                    test_ds=valid_ds, 
-                    y_true_labels=y_true, 
-                    output_dir=OUPUT_DIR,
-                    class_name=CLASSES_NAME)
 
 def evaluate_model(*,log,
                    model:tf.keras.Model, 
@@ -189,12 +190,11 @@ def evaluate_model(*,log,
 
     mlflow.log_figure(auc_fig, 'ROC-Curve.png')
 
+    log.info("Model evaluated.")
 
-    
-    # log.info("Model evaluated.")
 def get_callbacks(to_monitor, mode) -> list[tf.keras.callbacks.Callback]:
     
-    checkpoint_prefix = str(CHECK_POINT_DIR / "best_densenet121.keras")
+    checkpoint_prefix = str(CHECK_POINT_DIR / f"best_{EXPERIMENT_NAME}.keras")
 
     callbacks = [
         tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
@@ -204,9 +204,13 @@ def get_callbacks(to_monitor, mode) -> list[tf.keras.callbacks.Callback]:
                                             mode=mode,
                                             verbose=1),  # Display checkpoint saving messages
         tf.keras.callbacks.ReduceLROnPlateau(monitor=to_monitor,
-                                            mode=mode, factor=0.1, patience=5, min_lr=1e-7),
+                                            mode=mode,
+                                            verbose=1,
+                                            factor=0.1, patience=5, min_lr=1e-8),
         tf.keras.callbacks.EarlyStopping(monitor=to_monitor,
-                                            mode=mode, patience=15, restore_best_weights=True),
+                                            mode=mode,
+                                            verbose=1, 
+                                            patience=15, restore_best_weights=True),
     ]
     
     return callbacks
