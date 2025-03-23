@@ -21,17 +21,20 @@ import numpy as np
 from hydra import compose, initialize
 from mlflow.models.signature import ModelSignature
 from mlflow.types.schema import Schema, TensorSpec
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report
 from tensorflow.keras import mixed_precision
+from tensorflow.keras.optimizers.schedules import CosineDecay
 
 from src.data_loader.chest_x_ray_preprocessor import ChestXRayPreprocessor
 from src.model.densenet121_model import build_DenseNet121
-from src.model.ResNet101V2_model import build_ResNet101V2
+from src.model.ResNet50V2_model import build_ResNet50V2
 from src.utils.logs import get_logger
 from src.utils.utils import download_dataset, plot_auc_curve
+from src.weighted_loss.focal_loss import focal_loss
 from src.weighted_loss.weighted_loss import get_weighted_loss
 
 # mixed_precision.set_global_policy('mixed_float16')
+
 # Set environment variables
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -47,10 +50,8 @@ tf.random.set_seed(42)
 
 with initialize(version_base=None, config_path="conf"):
     cfg = compose(config_name="config")
-    print(cfg.DATASET_DIRS.TRAIN_IMAGES_DIR)
-
-
-# ## Constants
+    
+# Constants
 IMAGE_SIZE = cfg.TRAIN.IMG_SIZE
 BATCH_SIZE = cfg.TRAIN.BATCH_SIZE
 NUM_EPOCHS = cfg.TRAIN.NUM_EPOCHS
@@ -60,7 +61,9 @@ OUPUT_DIR.mkdir(parents=True, exist_ok=True)
 CHECK_POINT_DIR = Path(cfg.OUTPUTS.CHECKPOINT_PATH)
 CHECK_POINT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR = 'logs'
-EXPERIMENT_NAME = 'build_ResNet101V2'
+EXPERIMENT_NAME = 'build_DenseNet121-focal_loss'
+
+
 
 def main() -> None:
     log = get_logger(__name__, log_level=logging.INFO)
@@ -82,7 +85,7 @@ def main() -> None:
     preprocessor = ChestXRayPreprocessor(cfg, labels=CLASSES_NAME)
     train_ds, valid_ds, pos_weights, neg_weights, steps_per_epoch= preprocessor.get_training_and_validation_datasets()
 
-    to_monitor = 'val_precision'
+    to_monitor = 'val_AUC'
     mode = 'max'
     mlflow.tensorflow.autolog(log_models=True, 
                             log_datasets=False, 
@@ -92,10 +95,10 @@ def main() -> None:
                             checkpoint_monitor=to_monitor, 
                             checkpoint_mode=mode)
     # Start an MLflow run
-    with mlflow.start_run() as run:
+    with mlflow.start_run() as _:
         input_shape = (IMAGE_SIZE, IMAGE_SIZE, 3)
-        # model = build_DenseNet121(input_shape=input_shape, num_classes=len(CLASSES_NAME))
-        model = build_ResNet101V2(input_shape=input_shape, num_classes=len(CLASSES_NAME))
+        model = build_DenseNet121(input_shape=input_shape, num_classes=len(CLASSES_NAME))
+        # model = build_ResNet50V2(input_shape=input_shape, num_classes=len(CLASSES_NAME))
         log.debug(f"Model summary: {model.summary()}")
 
         METRICS = [
@@ -104,9 +107,17 @@ def main() -> None:
             tf.keras.metrics.Recall(name='recall'),
             tf.keras.metrics.AUC(name='AUC'), 
         ]
-
-        model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate=LEARNING_RATE), 
-                    loss=get_weighted_loss(pos_weights, neg_weights),
+        lr_schedule = CosineDecay(
+            LEARNING_RATE,
+            decay_steps=steps_per_epoch * NUM_EPOCHS,
+            alpha=0.001
+        )
+        model.compile(optimizer = tf.keras.optimizers.AdamW(
+                        learning_rate=lr_schedule,
+                        weight_decay=1e-5,
+                        global_clipnorm=1.0), 
+                    # loss=get_weighted_loss(pos_weights, neg_weights),
+                    loss=focal_loss,
                     metrics=METRICS)     
 
         callbacks = get_callbacks(to_monitor, mode)
@@ -118,34 +129,10 @@ def main() -> None:
                 epochs = NUM_EPOCHS,
                 callbacks=callbacks)
 
-        # test_ds = preprocessor.get_test_dataset()
-    
-        # 1. Input Schema
-        # -----------------
-        # Your input is a batch of images with shape (32, 240, 240, 3)
-        # We use -1 to indicate that the batch size can vary.
-        input_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, *input_shape), "image")])
-
-        # 2. Output Schema - Multilabel binary classification head
-        # ------------------
-        # Your model outputs a list of two arrays. We need to define a schema for each.
-        # Array 1: Shape (1, 3)
-        output_schema = Schema([TensorSpec(np.dtype(np.float32), (-1, len(CLASSES_NAME)), "classification")])
-
-        # 3. Model Signature
-        # --------------------
-        # Combine the input and output schemas into a ModelSignature
-        signature = ModelSignature(inputs=input_schema, outputs=output_schema)
-        mlflow.tensorflow.log_model(
-            model,
-            "my_model",
-            signature=signature,
-            code_paths=["src"],
-        )
         y_true = np.array([y.astype(int) for _, y in valid_ds.unbatch().as_numpy_iterator()])
 
         evaluate_model(log=log,
-                    model=model, 
+                        model=model, 
                         test_ds=valid_ds, 
                         y_true_labels=y_true, 
                         output_dir=OUPUT_DIR,
@@ -210,7 +197,7 @@ def get_callbacks(to_monitor, mode) -> list[tf.keras.callbacks.Callback]:
         tf.keras.callbacks.EarlyStopping(monitor=to_monitor,
                                             mode=mode,
                                             verbose=1, 
-                                            patience=15, restore_best_weights=True),
+                                            patience=10, restore_best_weights=True),
     ]
     
     return callbacks

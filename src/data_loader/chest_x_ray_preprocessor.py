@@ -39,12 +39,11 @@ class ChestXRayPreprocessor:
 
         self.TRAIN_CSV_LABELS = ['Image Index', 'Finding Labels']
 
-        self.normalization_layer = tf.keras.layers.Normalization()
         self.data_augmentation = tf.keras.Sequential([
-            tf.keras.layers.RandomRotation(0.10, fill_mode='constant', seed=49),
-            tf.keras.layers.RandomTranslation(0.05, 0.05, fill_mode='constant', seed=49),
-            tf.keras.layers.RandomZoom(0.1, 0.1, fill_mode='constant', seed=49),
-            tf.keras.layers.GaussianNoise(0.2, seed=49),  
+            tf.keras.layers.RandomRotation(0.05, fill_mode='nearest', seed=49),
+            tf.keras.layers.RandomTranslation(0.05, 0.05, fill_mode='nearest', seed=49),
+            tf.keras.layers.RandomZoom(0.05, 0.05, fill_mode='nearest', seed=49),
+            tf.keras.layers.GaussianNoise(0.1, seed=49),  
         ])
 
     @tf.function
@@ -61,10 +60,10 @@ class ChestXRayPreprocessor:
         image = tf.image.convert_image_dtype(image, dtype=tf.float32)
         if is_training:
             # Augementing more on all the labels except no finding to handle class imbalance
-            image = tf.image.random_brightness(image, max_delta=0.2)
-            image = tf.image.random_contrast(image, lower=0.8, upper=1.2)
-            image = tf.image.random_hue(image, max_delta=0.2)
-            image = tf.image.random_saturation(image, lower=0.8, upper=1.2)
+            image = tf.image.random_brightness(image, max_delta=0.1)
+            image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
+            image = tf.image.random_hue(image, max_delta=0.1)
+            image = tf.image.random_saturation(image, lower=0.9, upper=1.1)
             image, label = self.augment_image(image, label)
 
         label = tf.cast(label, tf.float32)
@@ -73,18 +72,17 @@ class ChestXRayPreprocessor:
     @tf.function
     def augment_image(self, image, label)-> tuple[tf.Tensor, tf.Tensor]:
         """Applies data augmentation to an image."""
-        self.log.info("Augmenting image")
-        if tf.math.reduce_any(label > 0):
-            return self.data_augmentation(image), label
-        else:
-            return image, label
+        if tf.math.reduce_any(label > 0): # if there is any label
+            # Apply more augmentation if there is a label
+            image = self.data_augmentation(image)
+        return image, label
     
     def prepare_dataset(self, dataset, batch_size, is_training=False)-> tf.data.Dataset:
         """Prepares a dataset for training or evaluation."""
         if is_training:
             self.log.info("Preparing training dataset with augmentation")
-            dataset = dataset.cache()
             dataset = dataset.shuffle(buffer_size=self.dataset_len, reshuffle_each_iteration=True) # shuffle before repeat
+            dataset = dataset.cache()
             
             # creates circle by joing start and end of dataset and roll it using batch size
             dataset = dataset.repeat().batch(batch_size) # batch before cache
@@ -122,17 +120,6 @@ class ChestXRayPreprocessor:
 
         return filtered_images_df, filterd_labels_df
 
-    def _normalization_layer_adapt(self, train_ds:tf.data.Dataset) -> None:
-        """Adapts the normalization layer to the training data."""
-        normalizing_size = int(self.dataset_len*0.30)
-        images_for_stats = train_ds.map(lambda x, _: x, 
-                                    num_parallel_calls=tf.data.AUTOTUNE)\
-                                .unbatch()\
-                                .batch(normalizing_size)\
-                                .take(1)  # Take just one batch
-        self.normalization_layer.adapt(images_for_stats)
-        self.log.info("Normalization layer adapted")
-
     def load_and_preprocess_dataframe(self, csv_path: str, is_training: bool, split_ratio: float = 0.2) -> tuple[tf.data.Dataset, tf.data.Dataset] | tf.data.Dataset:
         """Loads a dataframe from CSV, preprocesses it, and returns a tf.data.Dataset.
         Args:
@@ -156,27 +143,15 @@ class ChestXRayPreprocessor:
                                                                                 random_state=42, 
                                                                                 stratify=labels_df.values)
     
-        # Split the data into training and validation sets
-        # rest_images, self.test_images, rest_labels, self.test_labels = train_test_split(images_df.values, 
-        #                                                                         labels_df.values, 
-        #                                                                         test_size=0.1, 
-        #                                                                         random_state=42, 
-        #                                                                         stratify=labels_df.values)
-    
-        # train_images, val_images, train_labels, val_labels = train_test_split(rest_images, 
-        #                                                                         rest_labels, 
-        #                                                                         test_size=split_ratio, 
-        #                                                                         random_state=42, 
-        #                                                                         stratify=rest_labels)
         self.dataset_len = len(train_images)
         self.log.info(f"training split: {len(train_images)} and validation split: {len(val_images)}")
 
         train_dataset = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
         val_dataset = tf.data.Dataset.from_tensor_slices((val_images, val_labels))
-        self.log.info("Training dataset loaded")
         train_dataset = train_dataset.map(lambda x, y: self.load_image(x, y, is_training=True), num_parallel_calls=tf.data.AUTOTUNE)
-        self.log.info("Validation dataset loaded")
+        self.log.info("Training dataset loaded and Augmentation applied")
         val_dataset = val_dataset.map(lambda x, y: self.load_image(x, y, is_training=False), num_parallel_calls=tf.data.AUTOTUNE)
+        self.log.info("Validationdataset loaded and Augmentation applied")
 
         return train_dataset, val_dataset
 
@@ -191,8 +166,6 @@ class ChestXRayPreprocessor:
         self.log.info(f"Getting training and validation datasets with batch size:{batch_size}")
         train_ds, valid_ds = self.load_and_preprocess_dataframe(self.config.DATASET_DIRS.TRAIN_CSV, is_training=True)
 
-        self._normalization_layer_adapt(train_ds=train_ds)
-
         if not batch_size:
             batch_size = self.config.TRAIN.BATCH_SIZE
         self.unprocessed_val_ds = valid_ds
@@ -203,19 +176,4 @@ class ChestXRayPreprocessor:
         return train_ds, valid_ds, self.pos_weights, self.neg_weights, steps_per_epoch
 
 
-    def get_unprocessed_test_dataset(self, batch_size: int | None = None) -> tf.data.Dataset:
-        """Loads, preprocesses, and prepares the test dataset."""
-        self.log.info("Getting test dataset")
-        # df = pd.read_csv(self.config.DATASET_DIRS.TEST_CSV)
-
-        # image = df.Image
-        # labels_df = df[self.LABELS]
-
-        # dataset = tf.data.Dataset.from_tensor_slices((self.test_images, self.test_labels))
-        # test_ds = dataset.map(lambda x, y: self.load_image(x, y), num_parallel_calls=tf.data.AUTOTUNE)
-        # if not batch_size:
-        #     batch_size = self.config.TRAIN.BATCH_SIZE
-
-        # test_ds = self.prepare_dataset(test_ds, batch_size, is_training=False)
-        return self.unprocessed_val_ds
     
