@@ -1,6 +1,7 @@
 # chest-x-ray-diagnosis using [DenseNet](https://arxiv.org/abs/1608.06993)
 
-## Project Overview
+## 🏥 Project Overview
+
 [ChestX-ray8 dataset](https://arxiv.org/abs/1705.02315) which contains 108,948 frontal-view X-ray images of 32,717 unique patients. 
 - Each image in the data set contains multiple text-mined labels identifying 14 different pathological conditions. 
 - These in turn can be used by physicians to diagnose 8 different diseases. 
@@ -11,18 +12,23 @@
 
 ![alt text](resources/random_images.png)
 
-## 🏥 Project Overview
 
-ChestXpert is a cutting-edge deep learning system designed to analyze chest X-ray images and detect multiple pathological conditions simultaneously. Built on DenseNet121 architecture and trained from scratch, this system achieves clinical-grade accuracy across 14 different chest conditions, making it a powerful tool for radiological diagnosis assistance.
+### About Dataset
+NIH Chest X-ray Dataset Sample
+National Institutes of Health Chest X-Ray Dataset
+
+Chest X-ray exams are one of the most frequent and cost-effective medical imaging examinations available. However, clinical diagnosis of a chest X-ray can be challenging and sometimes more difficult than diagnosis via chest CT imaging. The lack of large publicly available datasets with annotations means it is still very difficult, if not impossible, to achieve clinically relevant computer-aided detection and diagnosis (CAD) in real world medical sites with chest X-rays. One major hurdle in creating large X-ray image datasets is the lack resources for labeling so many images. Prior to the release of this dataset, Openi was the largest publicly available source of chest X-ray images with 4,143 images available.
+
+This NIH Chest X-ray Dataset is comprised of 112,120 X-ray images with disease labels from 30,805 unique patients. To create these labels, the authors used Natural Language Processing to text-mine disease classifications from the associated radiological reports. The labels are expected to be >90% accurate and suitable for weakly-supervised learning. The original radiology reports are not publicly available but you can find more details on the labeling process in this Open Access paper: "ChestX-ray8: Hospital-scale Chest X-ray Database and Benchmarks on Weakly-Supervised Classification and Localization of Common Thorax Diseases." (Wang et al.)
 
 ## 🌟 Key Features
 
 - Multi-label classification of 14 different chest pathologies
-- DenseNet121 architecture with custom head used for training
-- Hyperparameter optimization using MLflow and optuna for model tuning
-- Class imbalance handling through specialized weighted loss functions
+- DenseNet121 and ResNet50V2 architecture with custom head used for training
+- Experiment tracking using MLflow
+- Class imbalance handling through specialized [weighted loss](src/weighted_loss/weighted_loss.py) and [focal loss](src/focal_loss/focal_loss.py)
 - Comprehensive evaluation metrics (precision, recall, F1-score, AUC)
-- Visualization tools for model interpretability using Grad-CAM
+
 
 ## 🧠 Technical Approach
 
@@ -30,72 +36,41 @@ ChestXpert is a cutting-edge deep learning system designed to analyze chest X-ra
 
 The scropt is built on DenseNet121, chosen for its ability to maintain feature propagation, encourage feature reuse, and reduce parameters. The architecture was modified to handle the specific challenges of chest X-ray interpretation.
 
-### Handling Class Imbalance
-
-To address class imbalance, a custom weighted loss function was implemented:
-
-```python
-
-def get_weighted_loss(pos_weights, neg_weights, epsilon=1e-7):
-    """
-    Return weighted loss function given negative weights and positive weights.
-
-    Args:
-      pos_weights (np.array): array of positive weights for each class, size (num_classes)
-      neg_weights (np.array): array of negative weights for each class, size (num_classes)
-    
-    Returns:
-      weighted_loss (function): weighted loss function
-    """
-    def weighted_loss(y_true, y_pred):
-        """
-        Return weighted loss value. 
-
-        Args:
-            y_true (Tensor): Tensor of true labels, size is (num_examples, num_classes)
-            y_pred (Tensor): Tensor of predicted labels, size is (num_examples, num_classes)
-        Returns:
-            loss (float): overall scalar loss summed across all classes
-        """
-        # initialize loss to zero
-        loss = 0.0
-
-        for i in range(len(pos_weights)):
-            y = y_true[:, i]
-            f_of_x = y_pred[:, i]
-
-            f_of_x_log = K.log(f_of_x + epsilon)
-            f_of_x_1_min_log = K.log((1-f_of_x) + epsilon)
-
-            first_term = pos_weights[i] * y * f_of_x_log
-            sec_term = neg_weights[i] * (1-y) * f_of_x_1_min_log
-            loss_per_col = - K.mean(first_term + sec_term)
-            loss += loss_per_col
-        return loss
-
-    return weighted_loss
-
-```
-
-
 ## 📊 Performance Highlights
 
-              precision    recall  f1-score   support
+Here's a breakdown of the model's performance, as reflected in the classification report:
 
- Atelectasis       0.31      0.46      0.37       102
-    Effusion       0.39      0.62      0.48       129
-Infiltration       0.38      0.41      0.40       193
-        Mass       0.21      0.33      0.26        57
-  No Finding       0.73      0.84      0.78       609
+|               | Precision | Recall | F1-Score | Support |
+| :------------ | :-------- | :----- | :------- | :------ |
+| Atelectasis   | 0.19      | 0.71   | 0.29     | 102     |
+| Effusion      | 0.32      | 0.52   | 0.40     | 129     |
+| Infiltration  | 0.32      | 0.34   | 0.33     | 193     |
+| Mass          | 0.10      | 0.51   | 0.16     | 57      |
+| No Finding    | 0.65      | 0.93   | 0.77     | 609     |
+| **Micro Avg** | 0.41      | 0.74   | 0.52     | 1090    |
+| **Macro Avg** | 0.32      | 0.60   | 0.39     | 1090    |
+| **Weighted Avg**| 0.48      | 0.74   | 0.57     | 1090    |
+| **Samples Avg** | 0.50      | 0.76   | 0.57     | 1090    |
 
-   micro avg       0.54      0.67      0.60      1090
-   macro avg       0.40      0.53      0.46      1090
-weighted avg       0.56      0.67      0.61      1090
- samples avg       0.60      0.69      0.63      1090
+**Key Observations:**
+
+*   **Class-Specific Performance:** The model demonstrates varying performance across different pathologies. For instance, it performs well in identifying "No Finding" (high precision, recall, and F1-score) but struggles with "Mass" (low precision and F1-score).
+*   **Micro, Macro, Weighted, and Samples Averages:** These averages provide a holistic view of the model's performance. The micro average is influenced by class imbalance, while the macro average treats all classes equally. The weighted average accounts for class support, and the samples average is relevant for multi-label classification.
+* **Support:** The support column indicates the number of true instances for each label in the test dataset.
+
+**Interpretation:**
+
+The table above shows the model's ability to correctly identify each pathology (precision), its ability to find all instances of each pathology (recall), and the harmonic mean of precision and recall (F1-score). The support column shows the number of actual occurrences of each pathology in the test set. The averages provide a summary of the model's overall performance.
+![ROC Curve](resources/final-roc-curve.png)
+
+## 🖼️ Model Predictions
+
+![Model Predictions](resources/trained-model-results.png)
+*Examples of the model's predictions on test images, showcasing its ability to identify various pathologies.*
 
 ## 🛠️ Technologies Used
 - tensorflow:25.02-tf2-py3 Docker image from [Nvidia](https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel-25-01.html#) to avoid GPU detection errors by Tensorflow
-- MLflow and optuna to find best Hyper parameters 
+- MLflow experiment tracking
 
 ## 🚀 Future Enhancements
 - use multiple models such as Mobilenetv3, inceptionresnetv2 and so on
@@ -120,4 +95,3 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 * https://www.kaggle.com/datasets/nih-chest-xrays/sample
 * https://www.kaggle.com/code/paultimothymooney/predicting-pathologies-in-x-ray-images/input
 * https://github.com/tamerthamoqa/CheXpert-multilabel-classification-tensorflow/tree/master
-* 

@@ -41,9 +41,11 @@ class ChestXRayPreprocessor:
 
         self.data_augmentation = tf.keras.Sequential([
             tf.keras.layers.RandomRotation(0.05, fill_mode='nearest', seed=49),
-            tf.keras.layers.RandomTranslation(0.05, 0.05, fill_mode='nearest', seed=49),
-            tf.keras.layers.RandomZoom(0.05, 0.05, fill_mode='nearest', seed=49),
-            tf.keras.layers.GaussianNoise(0.1, seed=49),  
+            tf.keras.layers.RandomTranslation(0.05, 0.05, fill_mode='nearest', seed=49), 
+            tf.keras.layers.RandomZoom(0.05, 0.05, fill_mode='nearest', seed=49), 
+            tf.keras.layers.GaussianNoise(0.05, seed=49), 
+            tf.keras.layers.RandomContrast(0.05, seed=49), 
+            tf.keras.layers.RandomBrightness(0.05, seed=49),
         ])
 
     @tf.function
@@ -85,7 +87,7 @@ class ChestXRayPreprocessor:
             dataset = dataset.cache()
             
             # creates circle by joing start and end of dataset and roll it using batch size
-            dataset = dataset.repeat().batch(batch_size) # batch before cache
+            dataset = dataset.repeat().batch(batch_size) 
         else:
             dataset = dataset.cache().batch(batch_size)
 

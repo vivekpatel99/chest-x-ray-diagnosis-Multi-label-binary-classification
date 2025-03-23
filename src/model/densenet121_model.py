@@ -25,7 +25,7 @@ def build_DenseNet121(input_shape:tuple, num_classes:int):
     base_model.trainable = True
 
     total_layers = len(base_model.layers)
-    trainable_layers = math.ceil(total_layers * 0.15) 
+    trainable_layers = math.ceil(total_layers * 0.20) 
     # Then freeze all layers except the last layers
     for layer in base_model.layers[:-trainable_layers]:
         layer.trainable = False
@@ -33,14 +33,14 @@ def build_DenseNet121(input_shape:tuple, num_classes:int):
     x = base_model.output
     x = GlobalAveragePooling2D()(x)
     x = BatchNormalization()(x)
-    x = Dense(512, activation='relu', kernel_regularizer=L1L2(0.0001))(x)
-    x = Dropout(0.3)(x)
+    x = Dense(512, activation='relu', kernel_regularizer=L1L2(0.001))(x)
+    x = Dropout(0.2)(x)
     x = BatchNormalization()(x)
-    x = Dense(256, activation='relu', kernel_regularizer=L1L2(0.0001))(x)
+    x = Dense(256, activation='relu', kernel_regularizer=L1L2(0.001))(x)
     x = Dropout(0.3)(x)
     x = BatchNormalization()(x)
     x = Dense(units=int(num_classes), name='final_dense',
-              kernel_regularizer=L1L2(0.001))(x)
+              kernel_regularizer=L1L2(0.01))(x)
     
     # activation must be float32 for metrics such as f1 score and so on
     predictions = Activation('sigmoid', dtype='float32', name='predictions')(x)

@@ -12,15 +12,12 @@
 """
 import logging
 import os
-from math import exp
 from pathlib import Path
 
 import mlflow
 import mlflow.experiments
 import numpy as np
 from hydra import compose, initialize
-from mlflow.models.signature import ModelSignature
-from mlflow.types.schema import Schema, TensorSpec
 from sklearn.metrics import classification_report
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.optimizers.schedules import CosineDecay
@@ -61,7 +58,7 @@ OUPUT_DIR.mkdir(parents=True, exist_ok=True)
 CHECK_POINT_DIR = Path(cfg.OUTPUTS.CHECKPOINT_PATH)
 CHECK_POINT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR = 'logs'
-EXPERIMENT_NAME = 'build_DenseNet121-focal_loss'
+EXPERIMENT_NAME = 'build_DenseNet121-weighted_loss'
 
 
 
@@ -116,8 +113,8 @@ def main() -> None:
                         learning_rate=lr_schedule,
                         weight_decay=1e-5,
                         global_clipnorm=1.0), 
-                    # loss=get_weighted_loss(pos_weights, neg_weights),
-                    loss=focal_loss,
+                    loss=get_weighted_loss(pos_weights, neg_weights),
+                    # loss=focal_loss,
                     metrics=METRICS)     
 
         callbacks = get_callbacks(to_monitor, mode)
@@ -134,6 +131,7 @@ def main() -> None:
         evaluate_model(log=log,
                         model=model, 
                         test_ds=valid_ds, 
+                        train_ds=train_ds,
                         y_true_labels=y_true, 
                         output_dir=OUPUT_DIR,
                         class_name=CLASSES_NAME)
@@ -143,6 +141,7 @@ def main() -> None:
 def evaluate_model(*,log,
                    model:tf.keras.Model, 
                    test_ds:tf.data.Dataset, 
+                   train_ds:tf.data.Dataset,
                    y_true_labels:np.ndarray, 
                    output_dir:Path,
                    class_name:list[str]) -> None:
@@ -162,7 +161,7 @@ def evaluate_model(*,log,
     mlflow.log_dict(results, 'test_metrics.json')
 
     y_prob_pred = model.predict(test_ds)
-    y_pred = (y_prob_pred>0.5).astype(int)
+    y_pred = (y_prob_pred>=0.5).astype(int)
 
     report = classification_report(y_true_labels,
                                     y_pred, 
@@ -186,7 +185,7 @@ def get_callbacks(to_monitor, mode) -> list[tf.keras.callbacks.Callback]:
     callbacks = [
         tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
         tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,
-                                            save_best_only=True, # Save only the best model based on val_loss
+                                            save_best_only=True, 
                                             monitor=to_monitor,
                                             mode=mode,
                                             verbose=1),  # Display checkpoint saving messages

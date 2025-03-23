@@ -10,7 +10,7 @@ of the modulating factor is likewise increased (γ = 2 works best in experiments
 α(alpha): balances focal loss, yields slightly improved accuracy over the non-α-balanced form.  
 """
 @tf.keras.saving.register_keras_serializable()
-def focal_loss(y_true, y_pred, gamma=4.0, alpha=4.0):
+def focal_loss(y_true, y_pred, gamma=2.0, alpha=0.75):
     """
     focal loss for multi-classification
     FL(p_t)=-alpha(1-p_t)^{gamma}ln(p_t)
