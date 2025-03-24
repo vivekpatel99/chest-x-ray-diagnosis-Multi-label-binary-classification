@@ -89,8 +89,6 @@ The table above shows the model's ability to correctly identify each pathology (
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
 
 ---
-
-*Developed by [Your Name] as part of advanced research in medical image analysis.*
 ## 📚 Reference
 * https://www.kaggle.com/datasets/nih-chest-xrays/sample
 * https://www.kaggle.com/code/paultimothymooney/predicting-pathologies-in-x-ray-images/input
